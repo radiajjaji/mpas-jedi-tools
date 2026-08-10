@@ -1,5 +1,13 @@
 # Native-MPAS B-Matrix — 12 km
 
+## Software provenance
+
+This 12-km native-MPAS covariance workflow was generated using the
+MPAS-JEDI **4.0.0** working environment.
+
+It is stored under `bmatrix/4.0.0/12km/` to preserve the software
+provenance of the successful B-matrix generation.
+
 ## Status
 
 Successfully generated and used in the operational MPAS-JEDI workflow.

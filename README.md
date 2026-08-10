@@ -77,6 +77,18 @@ The objective is to maintain a covariance-training workflow that
 remains inside the MPAS model system from the original atmospheric
 forecast samples through the final covariance representation.
 
+### Version provenance
+
+The **12-km** native-MPAS B-matrix generation workflow was developed
+and executed using the MPAS-JEDI **4.0.0** working tree.
+
+The **24-km** and **30-km** workflows documented in this repository
+are maintained under the MPAS-JEDI **3.0.3** workflow tree.
+
+The version-qualified directory structure is preserved intentionally
+so that the provenance of each successful covariance-generation
+workflow is explicit.
+
 ## B-Matrix Resolutions
 
 ### 12 km
@@ -122,9 +134,12 @@ operational/
 
 bmatrix/
   3.0.3/
-    12km/         Native 12-km covariance workflow
+
     24km/         24-km covariance workflow
     30km/         30-km covariance workflow
+
+  4.0.0/
+    12km/         Native 12-km covariance workflow
 
 docs/             Technical notes and documentation
 
