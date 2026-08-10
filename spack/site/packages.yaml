@@ -1,0 +1,132 @@
+packages:
+  # Common provider and package constraints
+  all:
+    providers:
+      zlib-api:: [zlib]
+
+  # This Cray system uses Linux and Cray MPICH rather than the classic
+  # Cray-specific ESMF operating-system configuration.
+  esmf:
+    require:
+    - 'esmf_os=Linux esmf_comm=mpich'
+
+  ewok-env:
+    require:
+    - '+ecflow'
+
+  # Verified AFAD operating-system packages
+  autoconf:
+    externals:
+    - spec: autoconf@2.69
+      prefix: /usr
+
+  automake:
+    externals:
+    - spec: automake@1.15.1
+      prefix: /usr
+
+  bash:
+    externals:
+    - spec: bash@4.4.23
+      prefix: /usr
+
+  binutils:
+    externals:
+    - spec: binutils@2.41
+      prefix: /usr
+
+  coreutils:
+    externals:
+    - spec: coreutils@8.32
+      prefix: /usr
+
+  cvs:
+    externals:
+    - spec: cvs@1.12.13
+      prefix: /usr
+
+  diffutils:
+    externals:
+    - spec: diffutils@3.6
+      prefix: /usr
+
+  findutils:
+    externals:
+    - spec: findutils@4.8.0
+      prefix: /usr
+
+  gawk:
+    externals:
+    - spec: gawk@4.2.1
+      prefix: /usr
+
+  git:
+    externals:
+    - spec: git@2.35.3
+      prefix: /usr
+
+  git-lfs:
+    externals:
+    - spec: git-lfs@3.4.1
+      prefix: /scratch/lus/dev
+
+  gmake:
+    externals:
+    - spec: gmake@4.2.1
+      prefix: /usr
+
+  grep:
+    externals:
+    - spec: grep@3.1
+      prefix: /usr
+
+  groff:
+    externals:
+    - spec: groff@1.22.4
+      prefix: /usr
+
+  krb5:
+    externals:
+    - spec: krb5@1.20.1
+      prefix: /usr
+
+  m4:
+    externals:
+    - spec: m4@1.4.18
+      prefix: /usr
+
+  openssh:
+    externals:
+    - spec: openssh@8.4p1
+      prefix: /usr
+
+  pkg-config:
+    externals:
+    - spec: pkg-config@0.29.2
+      prefix: /usr
+
+  sed:
+    externals:
+    - spec: sed@4.4
+      prefix: /usr
+
+  subversion:
+    externals:
+    - spec: subversion@1.14.1
+      prefix: /usr
+
+  tar:
+    externals:
+    - spec: tar@1.34
+      prefix: /usr
+
+  wget:
+    externals:
+    - spec: wget@1.20.3
+      prefix: /usr
+
+  zlib:
+    buildable: false
+    externals:
+    - spec: zlib@1.2.13
+      prefix: /usr

@@ -1,0 +1,48 @@
+# Runtime logs
+logs/
+*.log
+*.out
+*.err
+slurm-*.out
+
+# Backup/editor files
+*.bak
+*.backup
+*~
+*.swp
+*.swo
+
+# Core dumps
+core
+core.*
+
+# Build products
+*.o
+*.mod
+*.a
+*.so
+*.so.*
+CMakeCache.txt
+CMakeFiles/
+
+# Git repositories copied from upstream trees
+.git/
+
+# Large scientific/runtime data are excluded by default.
+# Selected public B-matrix products will be explicitly handled later.
+*.nc
+*.nc4
+*.grib
+*.grb
+*.grib2
+
+# Common MPAS training/runtime products
+background.nc
+ensemble.nc
+control.nc
+bg.*.nc
+
+# Temporary/scratch files
+tmp/
+temp/
+scratch/

@@ -1,0 +1,1001 @@
+# Operational MPAS-JEDI 3.0.3 template following the NCAR 3D-Var example
+# Merged from jedi.400.yaml and the MPAS-JEDI 3.0.2 3D-Var reference; preserves placeholders and OBS markers
+# Poisson-disk thinning and operational observer settings retained from jedi.302.yaml
+# Cold-start template: radiance bias inputs are seed files; outputs are newly generated satbias files.
+# No covariance prior is used in this cold-start template.
+
+_clear crtm: &clearCRTMObsOperator
+  name: CRTM
+  SurfaceWindGeoVars: uv
+  Absorbers: [H2O, O3]
+  linear obs operator:
+    Absorbers: [H2O]
+  obs options: &CRTMObsOptions
+    EndianType: little_endian
+    CoefficientPath: ./UFOCoeff/
+    IRVISlandCoeff: IGBP
+
+_cloudy crtm: &cloudyCRTMObsOperator
+  name: CRTM
+  SurfaceWindGeoVars: uv
+  Absorbers: [H2O, O3]
+  Clouds: [Water, Ice, Rain, Snow, Graupel]
+  linear obs operator:
+    Absorbers: [H2O]
+    Clouds: [Water, Ice, Rain, Snow, Graupel]
+  obs options:
+    <<: *CRTMObsOptions
+
+cost function:
+  cost type: __COST_TYPE__
+  time window:
+    begin: '__WIN_BEG_ISO__'
+    length: __WIN_LEN__
+  jb evaluation: false
+  geometry:
+    nml_file: "./namelist.atmosphere"
+    streams_file: "./streams.atmosphere"
+
+
+  analysis variables: &incvars
+  - temperature
+  - spechum
+  - uReconstructZonal
+  - uReconstructMeridional
+  - surface_pressure
+  - qc
+  - qi
+  - qg
+  - qr
+  - qs
+
+#<MODEL_BLOCK>
+  # Deterministic nonlinear trajectory used by 3D-FGAT and 4D-Var/4D-FGAT.
+  model:
+    name: MPAS
+    tstep: __FGAT_TSTEP__
+    nml_file: "./namelist.atmosphere"
+    streams_file: "./streams.atmosphere"
+    model variables: &modvars
+    - temperature
+    - spechum
+    - uReconstructZonal
+    - uReconstructMeridional
+    - surface_pressure
+    - theta
+    - rho
+    - u
+    - qv
+    - pressure
+    - landmask
+    - xice
+    - snowc
+    - skintemp
+    - ivgtyp
+    - isltyp
+    - qc
+    - qi
+    - qr
+    - qs
+    - qg
+    - pressure_p
+    - snowh
+    - snow
+    - vegfra
+    - u10
+    - v10
+    - lai
+    - smois
+    - tslb
+    - w
+    - cldfrac
+#</MODEL_BLOCK>
+
+  # The deterministic background and the hybrid covariance are rendered by
+  # jedi.oper.sh. Ensemble trajectories belong only to background error.
+__BACKGROUND_BLOCK__
+
+__BACKGROUND_ERROR_BLOCK__
+
+  observations:
+    observers:
+
+#<OBS_SONDES>
+    - obs space:
+        name: Radiosonde
+        obsdatain:
+          engine:
+            type: H5File
+            obsfile: ./sondes_obs___ANL_TAG_H5__.h5
+        obsdataout:
+          engine:
+            type: H5File
+            obsfile: ./obsout_da_sondes.h5
+        simulated variables: [airTemperature, virtualTemperature, windEastward, windNorthward, specificHumidity]
+      obs operator:
+        name: VertInterp
+      obs error:
+        covariance model: diagonal
+      obs filters:
+      - filter: PreQC
+        maxvalue: 3
+        apply at iterations: 0
+      - filter: Bounds Check
+        filter variables:
+        - name: specificHumidity
+        test variables:
+        - name: ObsErrorData/specificHumidity
+        minvalue: 0.0
+        maxvalue: 1.0
+      - filter: Background Check
+        threshold: 3.0
+        apply at iterations: 0, 1
+
+#</OBS_SONDES>
+#<OBS_AIRCRAFT>
+    - obs space:
+        name: Aircraft
+        obsdatain:
+          engine:
+            type: H5File
+            obsfile: ./aircraft_obs___ANL_TAG_H5__.h5
+        obsdataout:
+          engine:
+            type: H5File
+            obsfile: ./obsout_da_aircraft.h5
+        simulated variables: [airTemperature, windEastward, windNorthward, specificHumidity]
+      obs operator:
+        name: VertInterp
+      obs error:
+        covariance model: diagonal
+      obs filters:
+      - filter: PreQC
+        maxvalue: 3
+        apply at iterations: 0
+      # Met Office-style deterministic Poisson-disk thinning.
+      # min_horizontal_spacing is in km.
+      - filter: Poisson Disk Thinning
+        min_horizontal_spacing: 50.0
+        exclusion_volume_shape: ellipsoid
+        shuffle: false
+      - filter: Background Check
+        threshold: 3.0
+        apply at iterations: 0, 1
+
+#</OBS_AIRCRAFT>
+#<OBS_GNSSRO>
+    - obs space:
+        name: GnssroRefNCEP
+        obsdatain:
+          engine:
+            type: H5File
+            obsfile: ./gnssro_obs___ANL_TAG_H5__.h5
+        obsdataout:
+          engine:
+            type: H5File
+            obsfile: ./obsout_da_gnssroref.h5
+        simulated variables: [atmosphericRefractivity]
+      obs operator:
+        name: GnssroRefNCEP
+        obs options:
+          use_compress: 0
+      obs error:
+        covariance model: diagonal
+      obs filters:
+      - filter: Domain Check
+        where:
+        - variable:
+            name: MetaData/impactHeightRO
+          minvalue: 0
+          maxvalue: 30000
+        - variable:
+            name: MetaData/earthRadiusCurvature
+          minvalue: 6250000
+          maxvalue: 6450000
+        - variable:
+            name: MetaData/geoidUndulation
+          minvalue: -200
+          maxvalue: 200
+      - filter: Background Check
+        apply at iterations: 0, 1
+        threshold: 3
+      - filter: ROobserror
+        apply at iterations: 0, 1
+        variable: atmosphericRefractivity
+        errmodel: NCEP
+
+#</OBS_GNSSRO>
+#<OBS_SFC_TQPS>
+    - obs space:
+        name: SfcPCorrected
+        obsdatain:
+          engine:
+            type: H5File
+            obsfile: ./sfc_obs___ANL_TAG_H5__.h5
+        obsdataout:
+          engine:
+            type: H5File
+            obsfile: ./obsout_da_sfc.h5
+        simulated variables: [stationPressure]
+        obs perturbations seed: 1
+      obs operator:
+        name: SfcPCorrected
+        da_psfc_scheme: UKMO   # or WRFDA
+      linear obs operator:
+        name: Identity
+        observation alias file: ./obsop_name_map.yaml
+      obs error:
+        covariance model: diagonal
+      obs filters:
+      - filter: PreQC
+        maxvalue: 3
+      - filter: Difference Check
+        reference: MetaData/stationElevation
+        value: GeoVaLs/surface_altitude
+        threshold: 200.0
+      - filter: Background Check
+        threshold: 3.0
+
+#</OBS_SFC_TQPS>
+#<OBS_SATWIND>
+    - obs space:
+        name: Satwind
+        obsdatain:
+          engine:
+            type: H5File
+            obsfile: ./satwind_obs___ANL_TAG_H5__.h5
+        obsdataout:
+          engine:
+            type: H5File
+            obsfile: ./obsout_da_satwind.h5
+        simulated variables: [windEastward, windNorthward]
+      obs operator:
+        name: VertInterp
+      obs error:
+        covariance model: diagonal
+      obs filters:
+      - filter: PreQC
+        maxvalue: 3
+        apply at iterations: 0
+      - filter: Perform Action
+        filter variables:
+        - name: windEastward
+        - name: windNorthward
+        action:
+          name: assign error
+          error function:
+            name: ObsErrorModelStepwiseLinear@ObsFunction
+            options:
+              xvar:
+                name: MetaData/pressure
+              xvals: [100000, 95000, 80000, 65000, 60000, 55000, 50000, 45000, 40000, 35000, 30000, 25000, 20000, 15000, 10000]
+              errors: [1.4, 1.5, 1.6, 1.8, 1.9, 2.0, 2.1, 2.3, 2.6, 2.8, 3.0, 3.2, 2.7, 2.4, 2.1]
+      - filter: Bounds Check
+        filter variables:
+        - name: windEastward
+        - name: windNorthward
+        test variables:
+        - name: ObsErrorData/windEastward
+        - name: ObsErrorData/windNorthward
+        minvalue: 0.0
+        maxvalue: 200.0
+      # Met Office-style deterministic Poisson-disk thinning.
+      # min_horizontal_spacing is in km.
+      - filter: Poisson Disk Thinning
+        min_horizontal_spacing: 100.0
+        exclusion_volume_shape: ellipsoid
+        shuffle: false
+      - filter: Background Check
+        threshold: 3.0
+        apply at iterations: 0, 1
+
+
+#</OBS_SATWIND>
+#<OBS_SATWND>
+    - obs space:
+        name: Satwnd
+        obsdatain:
+          engine:
+            type: H5File
+            obsfile: ./satwnd_obs___ANL_TAG_H5__.h5
+        obsdataout:
+          engine:
+            type: H5File
+            obsfile: ./obsout_da_satwnd.h5
+        simulated variables: [windEastward, windNorthward]
+      obs operator:
+        name: VertInterp
+      obs error:
+        covariance model: diagonal
+      obs filters:
+      - filter: PreQC
+        maxvalue: 3
+        apply at iterations: 0
+      # Met Office-style deterministic Poisson-disk thinning.
+      # min_horizontal_spacing is in km.
+      - filter: Poisson Disk Thinning
+        min_horizontal_spacing: 100.0
+        exclusion_volume_shape: ellipsoid
+        shuffle: false
+      - filter: Background Check
+        threshold: 3.0
+        apply at iterations: 0, 1
+
+#</OBS_SATWND>
+#<OBS_AMSUA_METOP_B>
+    - obs space:
+        name: amsua_metop-b
+        obsdatain:
+          engine:
+            type: H5File
+            obsfile: ./amsua_metop-b_obs___ANL_TAG_H5__.h5
+        obsdataout:
+          engine:
+            type: H5File
+            obsfile: ./obsout_da_amsua_metop-b_allsky.h5
+        simulated variables: [brightnessTemperature]
+        channels: &amsua_metop_b_allsky_channels 1-4,15
+
+      obs error:
+        covariance model: diagonal
+
+      obs operator:
+        <<: *cloudyCRTMObsOperator
+        obs options:
+          <<: *CRTMObsOptions
+          Sensor_ID: amsua_metop-b
+
+      # Cycling VarBC: use persistent priors when both files exist; otherwise cold start.
+      obs bias:
+__AMSUA_METOP_B_BIAS_INPUT_BLOCK__
+        output file: __AMSUA_METOP_B_BIAS_OUT__
+        variational bc:
+          predictors:
+          - name: constant
+          - name: lapseRate
+            order: 2
+            tlapse: &amsua_metop_b_tlap __AMSUA_METOP_B_TLAPMEAN__
+          - name: lapseRate
+            tlapse: *amsua_metop_b_tlap
+          - name: emissivityJacobian
+          - name: sensorScanAngle
+            order: 4
+          - name: sensorScanAngle
+            order: 3
+          - name: sensorScanAngle
+            order: 2
+          - name: sensorScanAngle
+        covariance:
+          minimal required obs number: 20
+          variance range: [1.0e-6, 10.0]
+          step size: 1.0e-4
+          largest analysis variance: 10000.0
+__AMSUA_METOP_B_COV_PRIOR_BLOCK__
+          output file: __AMSUA_METOP_B_COV_OUT__
+
+      obs filters:
+      - filter: Bounds Check
+        filter variables:
+        - name: brightnessTemperature
+          channels: *amsua_metop_b_allsky_channels
+        minvalue: 100.0
+        maxvalue: 500.0
+
+      - filter: Background Check
+        filter variables:
+        - name: brightnessTemperature
+          channels: *amsua_metop_b_allsky_channels
+        threshold: 10.0
+
+      - filter: BlackList
+        filter variables:
+        - name: brightnessTemperature
+          channels: *amsua_metop_b_allsky_channels
+        action:
+          name: assign error
+          error function:
+            name: ObsFunction/ObsErrorModelRamp
+            channels: *amsua_metop_b_allsky_channels
+            options:
+              channels: *amsua_metop_b_allsky_channels
+              xvar:
+                name: ObsFunction/CLWRetSymmetricMW
+                options:
+                  clwret_ch238: 1
+                  clwret_ch314: 2
+                  clwret_types: [ObsValue, HofX]
+                  bias_application: ObsValue
+              x0:   [0.030, 0.030, 0.030, 0.030, 0.030]
+              x1:   [0.590, 0.600, 0.440, 0.510, 0.260]
+              err0: [3.470, 2.780, 2.080, 0.870, 4.900]
+              err1: [31.11, 42.10, 14.21, 3.21, 15.14]
+
+#</OBS_AMSUA_METOP_B>
+#<OBS_AMSUA_METOP_C>
+    - obs space:
+        name: amsua_metop-c
+        obsdatain:
+          engine:
+            type: H5File
+            obsfile: ./amsua_metop-c_obs___ANL_TAG_H5__.h5
+        obsdataout:
+          engine:
+            type: H5File
+            obsfile: ./obsout_da_amsua_metop-c.h5
+        simulated variables: [brightnessTemperature]
+        channels: &amsua_metop_c_all_channels 1-15
+      obs error:
+        covariance model: diagonal
+      # Cycling VarBC: use persistent priors when both files exist; otherwise cold start.
+      obs bias:
+__AMSUA_METOP_C_BIAS_INPUT_BLOCK__
+        output file: __AMSUA_METOP_C_BIAS_OUT__
+        variational bc:
+          predictors:
+          - name: constant
+          - name: lapseRate
+            order: 2
+            tlapse: &amsua_metop_c_tlap __AMSUA_METOP_C_TLAPMEAN__
+          - name: lapseRate
+            tlapse: *amsua_metop_c_tlap
+          - name: emissivityJacobian
+          - name: sensorScanAngle
+            order: 4
+          - name: sensorScanAngle
+            order: 3
+          - name: sensorScanAngle
+            order: 2
+          - name: sensorScanAngle
+        covariance:
+          minimal required obs number: 20
+          variance range: [1.0e-6, 10.0]
+          step size: 1.0e-4
+          largest analysis variance: 10000.0
+__AMSUA_METOP_C_COV_PRIOR_BLOCK__
+          output file: __AMSUA_METOP_C_COV_OUT__
+      obs operator:
+        <<: *clearCRTMObsOperator
+        obs options:
+          <<: *CRTMObsOptions
+          Sensor_ID: &amsua_metop_c_sensor amsua_metop-c
+      obs filters:
+      - filter: Domain Check
+        where:
+        - variable:
+            name: MetaData/sensorZenithAngle
+          maxvalue: 45.0
+    #  CLW Retrieval Check
+      - filter: Bounds Check
+        filter variables:
+        - name: brightnessTemperature
+          channels: 1-6, 15
+        test variables:
+        - name: CLWRetMW@ObsFunction
+          options:
+            clwret_ch238: 1
+            clwret_ch314: 2
+            clwret_types: [ObsValue]
+        maxvalue: 999.0
+        action:
+          name: reject
+    #  CLW Retrieval Check
+      - filter: Bounds Check
+        filter variables:
+        - name: brightnessTemperature
+          channels: 1-6, 15
+        test variables:
+        - name: CLWRetMW@ObsFunction
+          options:
+            clwret_ch238: 1
+            clwret_ch314: 2
+            clwret_types: [HofX]
+        maxvalue: 999.0
+        action:
+          name: reject
+    #  Hydrometeor Check (cloud/precipitation affected chanels)
+#      - filter: Bounds Check
+#        filter variables:
+#        - name: brightnessTemperature
+#          channels: *amsua_metop_c_all_channels
+#        test variables:
+#        - name: HydrometeorCheckAMSUA@ObsFunction
+#          channels: *amsua_metop_c_all_channels
+#          options:
+#            channels: *amsua_metop_c_all_channels
+#            obserr_clearsky: [ 2.500, 2.200, 2.000, 0.550, 0.300,
+#                               0.230, 0.230, 0.250, 0.250, 0.350,
+#                               0.400, 0.550, 0.800, 3.000, 3.500]
+#            clwret_function:
+#              name: CLWRetMW@ObsFunction
+#              options:
+#                clwret_ch238: 1
+#                clwret_ch314: 2
+#                clwret_types: [ObsValue]
+#            obserr_function:
+#              name: ObsErrorModelRamp@ObsFunction
+#              channels: *amsua_metop_c_all_channels
+#              options:
+#                channels: *amsua_metop_c_all_channels
+#                xvar:
+#                  name: CLWRetSymmetricMW@ObsFunction
+#                  options:
+#                    clwret_ch238: 1
+#                    clwret_ch314: 2
+#                    clwret_types: [ObsValue, HofX]
+#                x0:    [ 0.050,  0.030,  0.030,  0.020,  0.000,
+#                         0.000,  0.000,  0.000,  0.000,  0.000,
+#                         0.000,  0.000,  0.000,  0.000,  0.030]
+#                x1:    [ 0.600,  0.450,  0.400,  0.450,  0.000,
+#                         0.000,  0.000,  0.000,  0.000,  0.000,
+#                         0.000,  0.000,  0.000,  0.000,  0.200]
+#                err0:  [ 2.500,  2.200,  2.000,  0.550,  0.300,
+#                         0.230,  0.230,  0.250,  0.250,  0.350,
+#                         0.400,  0.550,  0.800,  3.000,  3.500]
+#                err1:  [20.000, 18.000, 12.000,  3.000,  0.300,
+#                         0.230,  0.230,  0.250,  0.250,  0.350,
+#                         0.400,  0.550,  0.800,  3.000, 18.000]
+#        maxvalue: 0.0
+#        action:
+#          name: reject
+
+    #  Topography check
+      - filter: Perform Action
+        filter variables:
+        - name: brightnessTemperature
+          channels: *amsua_metop_c_all_channels
+        action:
+          name: inflate error
+          inflation variable:
+            name: ObsErrorFactorTopoRad@ObsFunction
+            channels: *amsua_metop_c_all_channels
+            options:
+              sensor: *amsua_metop_c_sensor
+              channels: *amsua_metop_c_all_channels
+    #  Transmittnace Top Check
+      - filter: Perform Action
+        filter variables:
+        - name: brightnessTemperature
+          channels: *amsua_metop_c_all_channels
+        action:
+          name: inflate error
+          inflation variable:
+            name: ObsErrorFactorTransmitTopRad@ObsFunction
+            channels: *amsua_metop_c_all_channels
+            options:
+              sensor: *amsua_metop_c_sensor
+              channels: *amsua_metop_c_all_channels
+    #  Surface Jacobian check
+      - filter: Perform Action
+        filter variables:
+        - name: brightnessTemperature
+          channels: *amsua_metop_c_all_channels
+        action:
+          name: inflate error
+          inflation variable:
+            name: ObsErrorFactorSurfJacobianRad@ObsFunction
+            channels: *amsua_metop_c_all_channels
+            options:
+              sensor: *amsua_metop_c_sensor
+              channels: *amsua_metop_c_all_channels
+              obserr_demisf: [0.010, 0.020, 0.015, 0.020, 0.200]
+              obserr_dtempf: [0.500, 2.000, 1.000, 2.000, 4.500]
+    #  Situation dependent Check
+      - filter: Perform Action
+        filter variables:
+        - name: brightnessTemperature
+          channels: *amsua_metop_c_all_channels
+        action:
+          name: inflate error
+          inflation variable:
+            name: ObsErrorFactorSituDependMW@ObsFunction
+            channels: *amsua_metop_c_all_channels
+            options:
+              sensor: *amsua_metop_c_sensor
+              channels: *amsua_metop_c_all_channels
+              clwobs_function:
+                name: CLWRetMW@ObsFunction
+                options:
+                  clwret_ch238: 1
+                  clwret_ch314: 2
+                  clwret_types: [ObsValue]
+              clwbkg_function:
+                name: CLWRetMW@ObsFunction
+                options:
+                  clwret_ch238: 1
+                  clwret_ch314: 2
+                  clwret_types: [HofX]
+                  bias_application: HofX
+              scatobs_function:
+                name: SCATRetMW@ObsFunction
+                options:
+                  scatret_ch238: 1
+                  scatret_ch314: 2
+                  scatret_ch890: 15
+                  scatret_types: [ObsValue]
+                  bias_application: HofX
+              clwmatchidx_function:
+                name: CLWMatchIndexMW@ObsFunction
+                channels: *amsua_metop_c_all_channels
+                options:
+                  channels: *amsua_metop_c_all_channels
+                  clwobs_function:
+                    name: CLWRetMW@ObsFunction
+                    options:
+                      clwret_ch238: 1
+                      clwret_ch314: 2
+                      clwret_types: [ObsValue]
+                  clwbkg_function:
+                    name: CLWRetMW@ObsFunction
+                    options:
+                      clwret_ch238: 1
+                      clwret_ch314: 2
+                      clwret_types: [HofX]
+                      bias_application: HofX
+                  clwret_clearsky: [0.050, 0.030, 0.030, 0.020, 0.000,
+                                    0.100, 0.000, 0.000, 0.000, 0.000,
+                                    0.000, 0.000, 0.000, 0.000, 0.030]
+              obserr_clearsky: [2.500, 2.200, 2.000, 0.550, 0.300,
+                                0.230, 0.230, 0.250, 0.250, 0.350,
+                                0.400, 0.550, 0.800, 3.000, 3.500]
+    #  - filter: Background Check
+    #    threshold: 3
+      - filter: Background Check
+        filter variables:
+        - name: brightnessTemperature
+          channels: *amsua_metop_c_all_channels
+        function absolute threshold:
+        - name: ObsErrorBoundMW@ObsFunction
+          channels: *amsua_metop_c_all_channels
+          options:
+            sensor: *amsua_metop_c_sensor
+            channels: *amsua_metop_c_all_channels
+            obserr_bound_latitude:
+              name: ObsErrorFactorLatRad@ObsFunction
+              options:
+                latitude_parameters: [25.0, 0.25, 0.04, 3.0]
+            obserr_bound_transmittop:
+              name: ObsErrorFactorTransmitTopRad@ObsFunction
+              channels: *amsua_metop_c_all_channels
+              options:
+                channels: *amsua_metop_c_all_channels
+            obserr_bound_topo:
+              name: ObsErrorFactorTopoRad@ObsFunction
+              channels: *amsua_metop_c_all_channels
+              options:
+                channels: *amsua_metop_c_all_channels
+                sensor: *amsua_metop_c_sensor
+            obserr_function:
+              name: ObsErrorModelRamp@ObsFunction
+              channels: *amsua_metop_c_all_channels
+              options:
+                channels: *amsua_metop_c_all_channels
+                xvar:
+                  name: CLWRetSymmetricMW@ObsFunction
+                  options:
+                    clwret_ch238: 1
+                    clwret_ch314: 2
+                    clwret_types: [ObsValue, HofX]
+                    bias_application: HofX
+                x0:    [ 0.050,  0.030,  0.030,  0.020,  0.000,
+                         0.000,  0.000,  0.000,  0.000,  0.000,
+                         0.000,  0.000,  0.000,  0.000,  0.030]
+                x1:    [ 0.600,  0.450,  0.400,  0.450,  0.000,
+                         0.000,  0.000,  0.000,  0.000,  0.000,
+                         0.000,  0.000,  0.000,  0.000,  0.200]
+                err0:  [ 2.500,  2.200,  2.000,  0.550,  0.300,
+                         0.230,  0.230,  0.250,  0.250,  0.350,
+                         0.400,  0.550,  0.800,  3.000,  3.500]
+                err1:  [20.000, 18.000, 12.000,  3.000,  0.300,
+                         0.230,  0.230,  0.250,  0.250,  0.350,
+                         0.400,  0.550,  0.800,  3.000, 18.000]
+            obserr_bound_max: [4.5, 4.5, 4.5, 2.5, 2.0,
+                               2.0, 2.0, 2.0, 2.0, 2.0,
+                               2.5, 3.5, 4.5, 4.5, 4.5]
+        action:
+          name: reject
+    #  Inter-channel check #amsua-n18
+      - filter: Bounds Check
+        filter variables:
+        - name: brightnessTemperature
+          channels: *amsua_metop_c_all_channels
+        test variables:
+        - name: InterChannelConsistencyCheck@ObsFunction
+          channels: *amsua_metop_c_all_channels
+          options:
+            channels: *amsua_metop_c_all_channels
+            sensor: *amsua_metop_c_sensor
+            use_flag: [ -1,  -1,  -1,  -1,  1,
+                        1, 1, 1,  1,  -1,
+                       -1, -1, -1, -1, -1 ]
+        maxvalue: 1.0e-12
+        action:
+          name: reject
+    #  Useflag check  #amsua-n18
+      - filter: Bounds Check
+        filter variables:
+        - name: brightnessTemperature
+          channels: *amsua_metop_c_all_channels
+        test variables:
+        - name: ChannelUseflagCheckRad@ObsFunction
+          channels: *amsua_metop_c_all_channels
+          options:
+            channels: *amsua_metop_c_all_channels
+            use_flag: [ -1, -1, -1, -1,  1,
+                        1, 1, 1,  1, -1,
+                       -1, -1, -1, -1, -1 ]
+        minvalue: 1.0e-12
+        action:
+          name: reject
+      - filter: Gaussian_Thinning
+        horizontal_mesh:   145 #km
+
+#</OBS_AMSUA_METOP_C>
+#<OBS_MHS_METOP_B>
+    - obs space:
+        name: mhs_metop-b
+        obsdatain:
+          engine:
+            type: H5File
+            obsfile: ./mhs_metop-b_obs___ANL_TAG_H5__.h5
+        obsdataout:
+          engine:
+            type: H5File
+            obsfile: ./obsout_da_mhs_metop-b.h5
+        simulated variables: [brightnessTemperature]
+        channels: &mhs_metop_b_channels 3-5
+      obs error:
+        covariance model: diagonal
+      # Cycling VarBC: use persistent priors when both files exist; otherwise cold start.
+      obs bias:
+__MHS_METOP_B_BIAS_INPUT_BLOCK__
+        output file: __MHS_METOP_B_BIAS_OUT__
+        variational bc:
+          predictors:
+          - name: constant
+          - name: lapseRate
+            order: 2
+            tlapse: &mhs_metop_b_tlap __MHS_METOP_B_TLAPMEAN__
+          - name: lapseRate
+            tlapse: *mhs_metop_b_tlap
+          - name: emissivityJacobian
+          - name: sensorScanAngle
+            order: 4
+          - name: sensorScanAngle
+            order: 3
+          - name: sensorScanAngle
+            order: 2
+          - name: sensorScanAngle
+        covariance:
+          minimal required obs number: 20
+          variance range: [1.0e-6, 10.0]
+          step size: 1.0e-4
+          largest analysis variance: 10000.0
+__MHS_METOP_B_COV_PRIOR_BLOCK__
+          output file: __MHS_METOP_B_COV_OUT__
+      obs operator:
+        <<: *clearCRTMObsOperator
+        obs options:
+          <<: *CRTMObsOptions
+          Sensor_ID: mhs_metop-b
+      obs filters:
+      # Met Office-style deterministic Poisson-disk thinning.
+      # min_horizontal_spacing is in km.
+      - filter: Poisson Disk Thinning
+        min_horizontal_spacing: 70.0
+        exclusion_volume_shape: ellipsoid
+        shuffle: false
+      - filter: Background Check
+        threshold: 10.0
+        apply at iterations: 0, 1
+
+#</OBS_MHS_METOP_B>
+#<OBS_MHS_METOP_C>
+    - obs space:
+        name: mhs_metop-c
+        obsdatain:
+          engine:
+            type: H5File
+            obsfile: ./mhs_metop-c_obs___ANL_TAG_H5__.h5
+        obsdataout:
+          engine:
+            type: H5File
+            obsfile: ./obsout_da_mhs_metop-c.h5
+        simulated variables: [brightnessTemperature]
+        channels: &mhs_metop_c_channels 3-5
+      obs error:
+        covariance model: diagonal
+      # Cycling VarBC: use persistent priors when both files exist; otherwise cold start.
+      obs bias:
+__MHS_METOP_C_BIAS_INPUT_BLOCK__
+        output file: __MHS_METOP_C_BIAS_OUT__
+        variational bc:
+          predictors:
+          - name: constant
+          - name: lapseRate
+            order: 2
+            tlapse: &mhs_metop_c_tlap __MHS_METOP_C_TLAPMEAN__
+          - name: lapseRate
+            tlapse: *mhs_metop_c_tlap
+          - name: emissivityJacobian
+          - name: sensorScanAngle
+            order: 4
+          - name: sensorScanAngle
+            order: 3
+          - name: sensorScanAngle
+            order: 2
+          - name: sensorScanAngle
+        covariance:
+          minimal required obs number: 20
+          variance range: [1.0e-6, 10.0]
+          step size: 1.0e-4
+          largest analysis variance: 10000.0
+__MHS_METOP_C_COV_PRIOR_BLOCK__
+          output file: __MHS_METOP_C_COV_OUT__
+      obs operator:
+        <<: *clearCRTMObsOperator
+        obs options:
+          <<: *CRTMObsOptions
+          Sensor_ID: mhs_metop-c
+      obs filters:
+      # Met Office-style deterministic Poisson-disk thinning.
+      # min_horizontal_spacing is in km.
+      - filter: Poisson Disk Thinning
+        min_horizontal_spacing: 70.0
+        exclusion_volume_shape: ellipsoid
+        shuffle: false
+      - filter: Background Check
+        threshold: 10.0
+        apply at iterations: 0, 1
+
+#</OBS_MHS_METOP_C>
+#<OBS_IASI_METOP_C>
+    - obs space:
+        name: iasi_metop-c
+        obsdatain:
+          engine:
+            type: H5File
+            obsfile: ./iasi_metop-c_obs___ANL_TAG_H5__.h5
+        obsdataout:
+          engine:
+            type: H5File
+            obsfile: ./obsout_da_iasi_metop-c.h5
+        simulated variables: [brightnessTemperature]
+        channels: &iasi_metop_c_channels 16,29,32,35,38,41,44
+      obs error:
+        covariance model: diagonal
+      obs operator:
+        <<: *clearCRTMObsOperator
+        Absorbers: [H2O, O3, CO2]
+        #CO2AbsorberMethod: MaunaLoa
+        obs options:
+          <<: *CRTMObsOptions
+          Sensor_ID: iasi_metop-c
+      obs filters:
+      # Met Office-style deterministic Poisson-disk thinning.
+      # min_horizontal_spacing is in km.
+      - filter: Poisson Disk Thinning
+        min_horizontal_spacing: 50.0
+        exclusion_volume_shape: ellipsoid
+        shuffle: false
+      - filter: Background Check
+        threshold: 10.0
+        apply at iterations: 0, 1
+
+#</OBS_IASI_METOP_C>
+#<OBS_ASCAT>
+    - obs space:
+        name: Ascat
+        obsdatain:
+          engine:
+            type: H5File
+            obsfile: ./ascat_obs___ANL_TAG_H5__.h5
+        obsdataout:
+          engine:
+            type: H5File
+            obsfile: ./obsout_da_ascat.h5
+        simulated variables: [windEastward, windNorthward]
+      obs operator:
+        name: VertInterp
+        variables:
+        - name: windEastward
+        - name: windNorthward
+      linear obs operator:
+        name: Identity
+        variables:
+        - name: windEastward
+        - name: windNorthward
+      obs error:
+        covariance model: diagonal
+      obs filters:
+      - filter: PreQC
+        maxvalue: 3
+        apply at iterations: 0
+      - filter: Background Check
+        threshold: 10.0
+        apply at iterations: 0, 1
+      - filter: Perform Action
+        filter variables:
+        - name: windEastward
+        - name: windNorthward
+        action:
+          name: passivate
+
+
+
+
+
+#</OBS_ASCAT>
+#<OBS_IASI_METOP_B>
+    - obs space:
+        name: iasi_metop-b
+        obsdatain:
+          engine:
+            type: H5File
+            obsfile: ./iasi_metop-b_obs___ANL_TAG_H5__.h5
+        obsdataout:
+          engine:
+            type: H5File
+            obsfile: ./obsout_da_iasi_metop-b.h5
+        simulated variables: [brightnessTemperature]
+        channels: &iasi_metop_b_channels 16,29,32,35,38,41,44
+      obs error:
+        covariance model: diagonal
+      # Cycling VarBC: use persistent priors when both files exist; otherwise cold start.
+      obs bias:
+__IASI_METOP_B_BIAS_INPUT_BLOCK__
+        output file: __IASI_METOP_B_BIAS_OUT__
+        variational bc:
+          predictors:
+          - name: constant
+          - name: lapseRate
+            order: 2
+            tlapse: &iasi_metop_b_tlap __IASI_METOP_B_TLAPMEAN__
+          - name: lapseRate
+            tlapse: *iasi_metop_b_tlap
+          - name: emissivityJacobian
+          - name: sensorScanAngle
+            order: 4
+          - name: sensorScanAngle
+            order: 3
+          - name: sensorScanAngle
+            order: 2
+          - name: sensorScanAngle
+        covariance:
+          minimal required obs number: 20
+          variance range: [1.0e-6, 10.0]
+          step size: 1.0e-4
+          largest analysis variance: 10000.0
+__IASI_METOP_B_COV_PRIOR_BLOCK__
+          output file: __IASI_METOP_B_COV_OUT__
+      obs operator:
+        <<: *clearCRTMObsOperator
+        Absorbers: [H2O, O3, CO2]
+        #CO2AbsorberMethod: MaunaLoa
+        obs options:
+          <<: *CRTMObsOptions
+          Sensor_ID: iasi_metop-b
+      obs filters:
+      # Met Office-style deterministic Poisson-disk thinning.
+      # min_horizontal_spacing is in km.
+      - filter: Poisson Disk Thinning
+        min_horizontal_spacing: 50.0
+        exclusion_volume_shape: ellipsoid
+        shuffle: false
+      - filter: Background Check
+        threshold: 10.0
+        apply at iterations: 0, 1
+
+
+
+
+#</OBS_IASI_METOP_B>
+output:
+  filename: "/scratch/lus/tmp/arw/day/assim/analysis.$Y-$M-$D_$h.$m.$s.nc"
+  stream name: analysis
+
+variational:
+__VARIATIONAL_ITERATIONS__
+
+final:
+  diagnostics:
+    departures: oman

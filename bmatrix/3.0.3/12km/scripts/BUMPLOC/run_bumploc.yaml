@@ -1,0 +1,106 @@
+_output config: &outputConfig
+  date: &validDate '2026-07-31T21:00:00Z'
+  stream name: control
+
+geometry:
+  nml_file: "./namelist.atmosphere"
+  streams_file: "./streams.atmosphere"
+  deallocate non-da fields: true
+  bump vunit: "height"
+
+background:
+  state variables: &vars
+  - temperature
+  - spechum
+  - uReconstructZonal
+  - uReconstructMeridional
+  - surface_pressure
+  filename: "./background.nc"
+  date: *validDate
+  stream name: background
+
+background error:
+  covariance model: SABER
+
+  saber central block:
+    saber block name: BUMP_NICAS
+    active variables: *vars
+
+    calibration:
+      io:
+        files prefix: mpas_bumploc
+
+      drivers:
+        multivariate strategy: duplicated
+        compute nicas: true
+        write local nicas: true
+        write global nicas: true
+        write nicas grids: true
+        internal dirac test: true
+
+      model:
+        nearest 3d level: bottom
+
+      grids:
+      - model:
+          variables:
+          - temperature
+          - spechum
+          - uReconstructZonal
+          - uReconstructMeridional
+          nearest 3d level: bottom
+
+      - model:
+          variables:
+          - surface_pressure
+          nearest 3d level: bottom
+
+      sampling:
+        computation grid size: 4096
+
+      nicas:
+        resolution: 8.0
+        explicit length-scales: true
+
+        horizontal length-scale:
+        - groups: [common]
+          value: 1200.0e3
+
+        vertical length-scale:
+        - groups: [common]
+          value: 6.0e3
+
+      dirac:
+      - {longitude: -135.0, latitude: -45.0, level: 1, variable: temperature}
+      - {longitude:  -45.0, latitude: -45.0, level: 1, variable: temperature}
+      - {longitude:   45.0, latitude: -45.0, level: 1, variable: temperature}
+      - {longitude:  135.0, latitude: -45.0, level: 1, variable: temperature}
+      - {longitude: -135.0, latitude:   0.0, level: 1, variable: temperature}
+      - {longitude:  -45.0, latitude:   0.0, level: 1, variable: temperature}
+      - {longitude:   45.0, latitude:   0.0, level: 1, variable: temperature}
+      - {longitude:  135.0, latitude:   0.0, level: 1, variable: temperature}
+      - {longitude: -135.0, latitude:  45.0, level: 1, variable: temperature}
+      - {longitude:  -45.0, latitude:  45.0, level: 1, variable: temperature}
+      - {longitude:   45.0, latitude:  45.0, level: 1, variable: temperature}
+      - {longitude:  135.0, latitude:  45.0, level: 1, variable: temperature}
+
+      output model files:
+      - parameter: loc_rh
+        file:
+          filename: ./loc_rh.$Y-$M-$D_$h.$m.$s.nc
+          <<: *outputConfig
+
+      - parameter: loc_rv
+        file:
+          filename: ./loc_rv.$Y-$M-$D_$h.$m.$s.nc
+          <<: *outputConfig
+
+      - parameter: nicas_norm
+        file:
+          filename: ./nicas_norm.$Y-$M-$D_$h.$m.$s.nc
+          <<: *outputConfig
+
+      - parameter: dirac_nicas
+        file:
+          filename: ./dirac_nicas.$Y-$M-$D_$h.$m.$s.nc
+          <<: *outputConfig

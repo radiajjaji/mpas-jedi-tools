@@ -1,0 +1,78 @@
+_member config: &memberConfig
+  state variables: &vars
+  - stream_function
+  - velocity_potential
+  - temperature
+  - spechum
+  - surface_pressure
+  date: &date '2026-05-12T12:00:00Z'
+  stream name: control_input
+  transform model to analysis: false
+
+geometry:
+  nml_file: ./namelist.atmosphere
+  streams_file: ./streams.atmosphere
+
+background:
+  state variables: *vars
+  filename: ./bg.2026-05-12_12.00.00.nc
+  date: *date
+  stream name: background
+  transform model to analysis: false
+
+background error:
+  covariance model: SABER
+  iterative ensemble loading: false
+
+  ensemble:
+    members from template:
+      template:
+        <<: *memberConfig
+        filename: ../samples/PTB_f48mf24_%mem%.nc
+      pattern: '%mem%'
+      nmembers: 67
+      zero padding: 3
+
+  output ensemble:
+    filename: ../samplesUnbalanced/PTB_f48mf24_%{member}%.nc
+    date: *date
+    stream name: control
+
+  saber central block:
+    saber block name: ID
+
+  saber outer blocks:
+  - saber block name: BUMP_VerticalBalance
+    calibration:
+      io:
+        files prefix: mpas
+
+      drivers:
+        write local sampling: true
+        write global sampling: true
+        compute vertical covariance: true
+        compute vertical balance: true
+        write vertical balance: true
+        vertical balance inverse test: true
+        adjoints test: true
+
+      sampling:
+        computation grid size: 100000
+        diagnostic grid size: 1000
+        reduced levels: 56
+        averaging latitude width: 10.0
+
+      vertical balance:
+        vbal:
+        - balanced variable: velocity_potential
+          unbalanced variable: stream_function
+          diagonal regression: true
+
+        - balanced variable: temperature
+          unbalanced variable: stream_function
+
+        - balanced variable: surface_pressure
+          unbalanced variable: stream_function
+
+        pseudo inverse: true
+        dominant mode: 20

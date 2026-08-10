@@ -1,0 +1,87 @@
+# spack-stack hash: c42007a
+# spack hash: 0a2c2f21d5
+spack:
+  concretizer:
+    unify: when_possible
+
+  view: false
+  include:
+  - site/packages_oneapi-2024.2.0.yaml
+  - site
+  - common/packages_oneapi.yaml
+  - common/modules_lmod.yaml
+  - common
+
+  specs:
+  - dev-utils-env
+  - ewok-env
+  - geos-gcm-env          ^esmf@=9.0.0b11
+  - global-workflow-env   ^esmf@=8.6.1 ^crtm@=3.1.3
+  # Is GMAO ready to move to crtm@3.1.3?
+  - gmao-swell-env                     ^crtm@=v2.4.1-jedi.2
+  - gsi-env                            ^crtm@=3.1.3
+  - jedi-fv3-env
+  - jedi-geos-env         ^esmf@=9.0.0b11
+  - jedi-mpas-env
+  - jedi-neptune-env      ^esmf@=9.0.0b11
+  - jedi-ufs-env          ^esmf@=8.8.0
+  - neptune-env           ^esmf@=9.0.0b11
+  - neptune-python-env    ^esmf@=9.0.0b11
+  - soca-env
+  - ufs-srw-app-env       ^esmf@=8.8.0 ^crtm@=3.1.3
+  - ufs-weather-model-env ^esmf@=8.8.0 ^crtm@=3.1.3
+
+  # Various crtm tags (list all to avoid duplicate packages)
+  - crtm@v2.4.1-jedi.2
+  - crtm@3.1.3
+
+  # Mapl with various esmf tags
+  - mapl@2.53.0 ^esmf@8.6.1
+  - mapl@2.53.4 ^esmf@8.8.0
+
+  # Various esmf tags (list all to avoid duplicate packages)
+  - esmf@=8.6.1
+  - esmf@=8.8.0
+  - esmf@=9.0.0b11
+
+  # Various fms builds
+  - fms +gfs_phys constants=GFS
+  - fms ~gfs_phys constants=GEOS
+
+  # MADIS for WCOSS2 decoders.
+  - madis@4.5
+
+  - mpifileutils
+  packages:
+    # Turn on python variant for esmf
+    esmf:
+      require:
+      - +python
+    # Avoid duplicate builds of parallelio +pnetcdf and ~pnetcdf
+    parallelio:
+      require:
+      - +pnetcdf
+  config:
+    install_tree:
+      root: /scratch/lus/arw/spack-stack-oper/installs/oneapi-2024.2.0
+  modules:
+    default:
+      roots:
+        lmod: /scratch/lus/arw/spack-stack-oper/installs/oneapi-2024.2.0/modulefiles
+        tcl: /scratch/lus/arw/spack-stack-oper/installs/oneapi-2024.2.0/modulefiles
+  bootstrap:
+    enable: true
+    root: $spack/bootstrap
+    sources:
+    - name: github-actions-v2
+      metadata: $spack/share/spack/bootstrap/github-actions-v2
+    - name: github-actions-v0.6
+      metadata: $spack/share/spack/bootstrap/github-actions-v0.6
+    - name: spack-install
+      metadata: $spack/share/spack/bootstrap/spack-install
+    trusted:
+    # By default we trust bootstrapping from sources and from binaries
+    # produced on Github via the workflow
+      github-actions-v2: true
+      github-actions-v0.6: true
+      spack-install: true
