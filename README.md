@@ -4,6 +4,33 @@ Reproducible build configurations, operational workflows, and
 background-error covariance generation tools for MPAS-JEDI,
 SABER/BUMP and MPAS-Atmosphere.
 
+## Scientific Result
+
+A central result documented by this repository is the successful
+generation of MPAS-JEDI/SABER background-error covariance matrices
+directly from **native MPAS-Atmosphere forecast data**.
+
+The covariance-training samples originate from an operational
+MPAS-Atmosphere forecasting system and remain within the MPAS
+framework throughout the covariance-generation workflow.
+
+The methodology has been successfully implemented at three
+horizontal resolutions:
+
+| Resolution | Result |
+|------------|--------|
+| **12 km** | Native-MPAS B-matrix successfully generated and used operationally |
+| **24 km** | Native-MPAS B-matrix successfully generated |
+| **30 km** | Native-MPAS B-matrix successfully generated |
+
+The complete covariance workflow includes:
+
+**Native MPAS forecasts -> VBAL -> HDIAGS -> NICAS -> BUMP localization -> MPAS-JEDI**
+
+This demonstrates a reproducible path for constructing MPAS-JEDI
+background-error covariances directly from an MPAS forecasting
+system and applying the methodology across multiple MPAS meshes.
+
 ## Native MPAS Background-Error Covariance Generation
 
 This repository documents a successful end-to-end generation and
