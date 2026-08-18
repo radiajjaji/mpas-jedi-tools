@@ -1,0 +1,469 @@
+
+===============================================================================
+[2026-08-18T09:30:05Z] JEDI OBS JOB STARTED
+===============================================================================
+[2026-08-18T09:30:05Z] RUN_DATE=2026081812
+[2026-08-18T09:30:05Z] RUN_CYCLE=12
+[2026-08-18T09:30:05Z] JEDI_ROOT=/scratch/lus/tmp/arw/day/jedi/r12
+[2026-08-18T09:30:05Z] LOG=/scratch/lus/arw/model/log/jedi.obs.2026081812.log
+[2026-08-18T09:30:05Z] HOST=uan01
+[2026-08-18T09:30:05Z] SLURM_JOB_ID=7593784
+[2026-08-18T09:30:05Z] LOCKFILE=/scratch/lus/arw/model/log/jedi.obs.GLOBAL.lock
+
+===============================================================================
+[2026-08-18T09:30:06Z] LOADING MODULES
+===============================================================================
+cray-netcdf-hdf5parallel/4.9.0.13(6):ERROR:150: Module 'cray-netcdf-hdf5parallel/4.9.0.13' conflicts with the currently loaded module(s) 'cray-netcdf/4.9.0.13'
+cray-netcdf-hdf5parallel/4.9.0.13(6):ERROR:102: Tcl command execution failed: conflict cray-netcdf
+
+[2026-08-18T09:30:06Z] Modules loaded.
+[2026-08-18T09:30:06Z] OBS2IODA_EXE=/scratch/lus/arw/model/src/obs2ioda_v3_src/build/bin/obs2ioda_v3
+[2026-08-18T09:30:06Z] LFTP_CMD=/scratch/lus/dev/bin/lftp
+[2026-08-18T09:30:06Z] DO_VALIDATE=0
+[2026-08-18T09:30:06Z] ANALYSIS_DATE=2026081800
+[2026-08-18T09:30:06Z] SLOT1=2026081718
+[2026-08-18T09:30:06Z] SLOT2=2026081800
+[2026-08-18T09:30:06Z] SLOT3=2026081806
+
+===============================================================================
+[2026-08-18T09:30:06Z] PREPARING DIRECTORIES
+===============================================================================
+[2026-08-18T09:30:06Z] Removing old HDF5 outputs for this cycle directory.
+[2026-08-18T09:30:06Z] Removing old OK markers for this RUN_DATE.
+[2026-08-18T09:30:06Z] Removing old isolated directories for RUN_DATE=2026081812 only.
+
+===============================================================================
+[2026-08-18T09:30:06Z] DOWNLOAD STAGE
+===============================================================================
+
+===============================================================================
+[2026-08-18T09:30:06Z] DOWNLOADING gdas1 slotdate=2026081718 stream=gdas
+===============================================================================
+[2026-08-18T09:30:06Z] Remote directory: /pub/data/nccf/com/obsproc/prod//gdas.20260817/.
+[2026-08-18T09:30:06Z] Local directory : /scratch/lus/tmp/arw/day/jedi/r12/download_2026081812/gdas1_2026081718
+[2026-08-18T09:30:06Z] Starting lftp for gdas1 2026081718
+[2026-08-18T09:30:06Z] Download progress/output follows:
+[2026-08-18T09:31:19Z] lftp finished for gdas1 2026081718 with rc=0
+[2026-08-18T09:31:19Z] Required prepbufr OK: gdas1.2026081718.gdas.t18z.prepbufr.nr
+[2026-08-18T09:31:19Z] Download gdas1 rc=0
+
+===============================================================================
+[2026-08-18T09:31:19Z] DOWNLOADING gdas2 slotdate=2026081800 stream=gdas
+===============================================================================
+[2026-08-18T09:31:19Z] Remote directory: /pub/data/nccf/com/obsproc/prod//gdas.20260818/.
+[2026-08-18T09:31:19Z] Local directory : /scratch/lus/tmp/arw/day/jedi/r12/download_2026081812/gdas2_2026081800
+[2026-08-18T09:31:19Z] Starting lftp for gdas2 2026081800
+[2026-08-18T09:31:19Z] Download progress/output follows:
+[2026-08-18T09:32:10Z] lftp finished for gdas2 2026081800 with rc=0
+[2026-08-18T09:32:10Z] Required prepbufr OK: gdas2.2026081800.gdas.t00z.prepbufr.nr
+[2026-08-18T09:32:10Z] Download gdas2 rc=0
+
+===============================================================================
+[2026-08-18T09:32:10Z] DOWNLOADING gdas3 slotdate=2026081806 stream=gfs
+===============================================================================
+[2026-08-18T09:32:10Z] Remote directory: /pub/data/nccf/com/obsproc/prod//gfs.20260818/.
+[2026-08-18T09:32:10Z] Local directory : /scratch/lus/tmp/arw/day/jedi/r12/download_2026081812/gdas3_2026081806
+[2026-08-18T09:32:10Z] Starting lftp for gdas3 2026081806
+[2026-08-18T09:32:10Z] Download progress/output follows:
+pget: Access failed: 404 Not Found (gfs.t06z.ssmisu.tm00.bufr_d)
+[2026-08-18T09:32:55Z] lftp finished for gdas3 2026081806 with rc=0
+[2026-08-18T09:32:55Z] Download warnings/errors seen for gdas3 2026081806:
+  pget: Access failed: 404 Not Found (gfs.t06z.ssmisu.tm00.bufr_d)
+[2026-08-18T09:32:55Z] Required prepbufr OK: gdas3.2026081806.gfs.t06z.prepbufr.nr
+[2026-08-18T09:32:55Z] Download gdas3 rc=0
+[2026-08-18T09:32:55Z] Download stage SUCCESS for all required prepbufr files.
+
+===============================================================================
+[2026-08-18T09:32:55Z] OBS2IODA CONVERSION STAGE
+===============================================================================
+
+===============================================================================
+[2026-08-18T09:32:55Z] PROCESSING gdas1 slotdate=2026081718 stream=gdas
+===============================================================================
+[2026-08-18T09:32:55Z] Supported obs2ioda inputs:
+[2026-08-18T09:32:55Z]   prepbufr : gdas1.2026081718.gdas.t18z.prepbufr.nr
+[2026-08-18T09:32:55Z]   satwnd   : gdas1.2026081718.gdas.t18z.satwnd.tm00.bufr_d
+[2026-08-18T09:32:55Z]   gpsro    : gdas1.2026081718.gdas.t18z.gpsro.tm00.bufr_d.nr
+[2026-08-18T09:32:55Z]   amsua    : gdas1.2026081718.gdas.t18z.1bamua.tm00.bufr_d
+[2026-08-18T09:32:55Z]   mhs      : gdas1.2026081718.gdas.t18z.1bmhs.tm00.bufr_d
+[2026-08-18T09:32:55Z]   iasi     : gdas1.2026081718.gdas.t18z.mtiasi.tm00.bufr_d
+[2026-08-18T09:32:56Z] Executing obs2ioda_v3...
+  obs2ioda |  --- processing gnssro.bufr ---
+  obs2ioda | ./gnssro.bufr file date is: 2026081718
+  obs2ioda |  --- reading ./prepbufr.bufr ---
+  obs2ioda | obs_errtable file is found. Will use user-provided obs errors.
+  obs2ioda |  ./prepbufr.bufr file date is: 2026081718
+  obs2ioda |  num_report_infile ./prepbufr.bufr :       640708
+  obs2ioda |  --- applying some additional QC as in GSI read_prepbufr.f90 for the global mode
+  obs2ioda |  l ---
+  obs2ioda |  --- filtering conv obs ---
+  obs2ioda |  --- sorting conv obs...
+  obs2ioda |                           nrecs     nlocs
+  obs2ioda |  sondes                     126     22960
+  obs2ioda |  aircraft                  2437      2422
+  obs2ioda |  sfc                     167744    163364
+  obs2ioda |  satwind                 177598    177598
+  obs2ioda |  satwnd                       0         0
+  obs2ioda |  profiler                     0         0
+  obs2ioda |  ascat                   232876    232876
+  obs2ioda |  --- writing ./sondes_obs_2026081718.h5
+  obs2ioda |  --- writing ./aircraft_obs_2026081718.h5
+  obs2ioda |  --- writing ./sfc_obs_2026081718.h5
+  obs2ioda |  --- writing ./satwind_obs_2026081718.h5
+  obs2ioda |  --- writing ./ascat_obs_2026081718.h5
+  obs2ioda |  --- reading ./satwnd.bufr ---
+  obs2ioda |  ./satwnd.bufr file date is: 2026081718
+  obs2ioda | obs_errtable file is found. Will use user-provided obs errors.
+  obs2ioda |  num_report_infile ./satwnd.bufr :    3293456
+  obs2ioda |  --- applying some additional QC as in GSI read_satwnd.f90 for the global model 
+  obs2ioda |  ---
+  obs2ioda |  --- sorting satwnd obs...
+  obs2ioda |                           nlocs
+  obs2ioda |  sondes                       0
+  obs2ioda |  aircraft                     0
+  obs2ioda |  sfc                          0
+  obs2ioda |  satwind                      0
+  obs2ioda |  satwnd                 3293456
+  obs2ioda |  profiler                     0
+  obs2ioda |  ascat                        0
+  obs2ioda |  --- writing ./satwnd_obs_2026081718.h5
+  obs2ioda |  --- reading ./amsua.bufr ---
+  obs2ioda |  ./amsua.bufr file date is: 2026081718
+  obs2ioda |  num_report_infile ./amsua.bufr :     162034
+  obs2ioda |  Warning: ./airs.bufr not found for decoding...
+  obs2ioda |  --- reading ./mhs.bufr ---
+  obs2ioda |  ./mhs.bufr file date is: 2026081718
+  obs2ioda |  num_report_infile ./mhs.bufr :    1445507
+  obs2ioda |  --- sorting radiance obs...
+  obs2ioda |                           nlocs
+  obs2ioda |  amsua_n15                    0
+  obs2ioda |  amsua_n18                    0
+  obs2ioda |  amsua_n19                    0
+  obs2ioda |  amsua_metop-a                0
+  obs2ioda |  amsua_metop-b            81024
+  obs2ioda |  amsua_metop-c            81010
+  obs2ioda |  amsua_aqua                   0
+  obs2ioda |  mhs_n18                      0
+  obs2ioda |  mhs_n19                      0
+  obs2ioda |  mhs_metop-a                  0
+  obs2ioda |  mhs_metop-b             729132
+  obs2ioda |  mhs_metop-c             716375
+  obs2ioda |  iasi_metop-a                 0
+  obs2ioda |  iasi_metop-b                 0
+  obs2ioda |  iasi_metop-c                 0
+  obs2ioda |  cris_npp                     0
+  obs2ioda |  cris_n20                     0
+  obs2ioda |  --- writing ./amsua_metop-b_obs_2026081718.h5
+  obs2ioda |  --- writing ./amsua_metop-c_obs_2026081718.h5
+  obs2ioda |  --- writing ./mhs_metop-b_obs_2026081718.h5
+  obs2ioda |  --- writing ./mhs_metop-c_obs_2026081718.h5
+  obs2ioda |  --- reading ./iasi.bufr ---
+  obs2ioda |  ./iasi.bufr file date is: 2026081718
+  obs2ioda |  num_report_infile ./iasi.bufr :     648004
+  obs2ioda |  Warning: ./cris.bufr not found for decoding...
+  obs2ioda |  --- sorting radiance obs...
+  obs2ioda |                           nlocs
+  obs2ioda |  amsua_n15                    0
+  obs2ioda |  amsua_n18                    0
+  obs2ioda |  amsua_n19                    0
+  obs2ioda |  amsua_metop-a                0
+  obs2ioda |  amsua_metop-b                0
+  obs2ioda |  amsua_metop-c                0
+  obs2ioda |  amsua_aqua                   0
+  obs2ioda |  mhs_n18                      0
+  obs2ioda |  mhs_n19                      0
+  obs2ioda |  mhs_metop-a                  0
+  obs2ioda |  mhs_metop-b                  0
+  obs2ioda |  mhs_metop-c                  0
+  obs2ioda |  iasi_metop-a                 0
+  obs2ioda |  iasi_metop-b            323668
+  obs2ioda |  iasi_metop-c            323561
+  obs2ioda |  cris_npp                     0
+  obs2ioda |  cris_n20                     0
+  obs2ioda |  --- reading ./iasi_metop-b.SpcCoeff.bin
+  obs2ioda |  --- converting radiance to brightness temperature... 
+  obs2ioda |  --- reading ./iasi_metop-c.SpcCoeff.bin
+  obs2ioda |  --- converting radiance to brightness temperature... 
+  obs2ioda |  --- writing ./iasi_metop-b_obs_2026081718.h5
+  obs2ioda |  --- writing ./iasi_metop-c_obs_2026081718.h5
+  obs2ioda |  all done!
+[2026-08-18T09:38:02Z] Date coherence OK: obs2ioda input date matches 2026081718
+[2026-08-18T09:38:08Z] SUCCESS gdas1 2026081718: copied 13 HDF5 files to /scratch/lus/tmp/arw/day/jedi/r12
+[2026-08-18T09:38:08Z] Process gdas1 rc=0
+
+===============================================================================
+[2026-08-18T09:38:08Z] PROCESSING gdas2 slotdate=2026081800 stream=gdas
+===============================================================================
+[2026-08-18T09:38:08Z] Supported obs2ioda inputs:
+[2026-08-18T09:38:08Z]   prepbufr : gdas2.2026081800.gdas.t00z.prepbufr.nr
+[2026-08-18T09:38:08Z]   satwnd   : gdas2.2026081800.gdas.t00z.satwnd.tm00.bufr_d
+[2026-08-18T09:38:08Z]   gpsro    : gdas2.2026081800.gdas.t00z.gpsro.tm00.bufr_d.nr
+[2026-08-18T09:38:08Z]   amsua    : gdas2.2026081800.gdas.t00z.1bamua.tm00.bufr_d
+[2026-08-18T09:38:08Z]   mhs      : gdas2.2026081800.gdas.t00z.1bmhs.tm00.bufr_d
+[2026-08-18T09:38:08Z]   iasi     : gdas2.2026081800.gdas.t00z.mtiasi.tm00.bufr_d
+[2026-08-18T09:38:08Z] Executing obs2ioda_v3...
+  obs2ioda |  --- processing gnssro.bufr ---
+  obs2ioda | ./gnssro.bufr file date is: 2026081800
+  obs2ioda |  --- reading ./prepbufr.bufr ---
+  obs2ioda | obs_errtable file is found. Will use user-provided obs errors.
+  obs2ioda |  ./prepbufr.bufr file date is: 2026081800
+  obs2ioda |  num_report_infile ./prepbufr.bufr :       649855
+  obs2ioda |  --- applying some additional QC as in GSI read_prepbufr.f90 for the global mode
+  obs2ioda |  l ---
+  obs2ioda |  --- filtering conv obs ---
+  obs2ioda |  --- sorting conv obs...
+  obs2ioda |                           nrecs     nlocs
+  obs2ioda |  sondes                    1161    165625
+  obs2ioda |  aircraft                  1740      1734
+  obs2ioda |  sfc                     164672    160319
+  obs2ioda |  satwind                 186811    186811
+  obs2ioda |  satwnd                       0         0
+  obs2ioda |  profiler                     0         0
+  obs2ioda |  ascat                   233287    233287
+  obs2ioda |  --- writing ./sondes_obs_2026081800.h5
+  obs2ioda |  --- writing ./aircraft_obs_2026081800.h5
+  obs2ioda |  --- writing ./sfc_obs_2026081800.h5
+  obs2ioda |  --- writing ./satwind_obs_2026081800.h5
+  obs2ioda |  --- writing ./ascat_obs_2026081800.h5
+  obs2ioda |  --- reading ./satwnd.bufr ---
+  obs2ioda |  ./satwnd.bufr file date is: 2026081800
+  obs2ioda | obs_errtable file is found. Will use user-provided obs errors.
+  obs2ioda |  num_report_infile ./satwnd.bufr :    2668256
+  obs2ioda |  --- applying some additional QC as in GSI read_satwnd.f90 for the global model 
+  obs2ioda |  ---
+  obs2ioda |  --- sorting satwnd obs...
+  obs2ioda |                           nlocs
+  obs2ioda |  sondes                       0
+  obs2ioda |  aircraft                     0
+  obs2ioda |  sfc                          0
+  obs2ioda |  satwind                      0
+  obs2ioda |  satwnd                 2668256
+  obs2ioda |  profiler                     0
+  obs2ioda |  ascat                        0
+  obs2ioda |  --- writing ./satwnd_obs_2026081800.h5
+  obs2ioda |  --- reading ./amsua.bufr ---
+  obs2ioda |  ./amsua.bufr file date is: 2026081800
+  obs2ioda |  num_report_infile ./amsua.bufr :     162042
+  obs2ioda |  Warning: ./airs.bufr not found for decoding...
+  obs2ioda |  --- reading ./mhs.bufr ---
+  obs2ioda |  ./mhs.bufr file date is: 2026081800
+  obs2ioda |  num_report_infile ./mhs.bufr :    1442972
+  obs2ioda |  --- sorting radiance obs...
+  obs2ioda |                           nlocs
+  obs2ioda |  amsua_n15                    0
+  obs2ioda |  amsua_n18                    0
+  obs2ioda |  amsua_n19                    0
+  obs2ioda |  amsua_metop-a                0
+  obs2ioda |  amsua_metop-b            81023
+  obs2ioda |  amsua_metop-c            81019
+  obs2ioda |  amsua_aqua                   0
+  obs2ioda |  mhs_n18                      0
+  obs2ioda |  mhs_n19                      0
+  obs2ioda |  mhs_metop-a                  0
+  obs2ioda |  mhs_metop-b             729050
+  obs2ioda |  mhs_metop-c             713922
+  obs2ioda |  iasi_metop-a                 0
+  obs2ioda |  iasi_metop-b                 0
+  obs2ioda |  iasi_metop-c                 0
+  obs2ioda |  cris_npp                     0
+  obs2ioda |  cris_n20                     0
+  obs2ioda |  --- writing ./amsua_metop-b_obs_2026081800.h5
+  obs2ioda |  --- writing ./amsua_metop-c_obs_2026081800.h5
+  obs2ioda |  --- writing ./mhs_metop-b_obs_2026081800.h5
+  obs2ioda |  --- writing ./mhs_metop-c_obs_2026081800.h5
+  obs2ioda |  --- reading ./iasi.bufr ---
+  obs2ioda |  ./iasi.bufr file date is: 2026081800
+  obs2ioda |  num_report_infile ./iasi.bufr :     647996
+  obs2ioda |  Warning: ./cris.bufr not found for decoding...
+  obs2ioda |  --- sorting radiance obs...
+  obs2ioda |                           nlocs
+  obs2ioda |  amsua_n15                    0
+  obs2ioda |  amsua_n18                    0
+  obs2ioda |  amsua_n19                    0
+  obs2ioda |  amsua_metop-a                0
+  obs2ioda |  amsua_metop-b                0
+  obs2ioda |  amsua_metop-c                0
+  obs2ioda |  amsua_aqua                   0
+  obs2ioda |  mhs_n18                      0
+  obs2ioda |  mhs_n19                      0
+  obs2ioda |  mhs_metop-a                  0
+  obs2ioda |  mhs_metop-b                  0
+  obs2ioda |  mhs_metop-c                  0
+  obs2ioda |  iasi_metop-a                 0
+  obs2ioda |  iasi_metop-b            322772
+  obs2ioda |  iasi_metop-c            322519
+  obs2ioda |  cris_npp                     0
+  obs2ioda |  cris_n20                     0
+  obs2ioda |  --- reading ./iasi_metop-b.SpcCoeff.bin
+  obs2ioda |  --- converting radiance to brightness temperature... 
+  obs2ioda |  --- reading ./iasi_metop-c.SpcCoeff.bin
+  obs2ioda |  --- converting radiance to brightness temperature... 
+  obs2ioda |  --- writing ./iasi_metop-b_obs_2026081800.h5
+  obs2ioda |  --- writing ./iasi_metop-c_obs_2026081800.h5
+  obs2ioda |  all done!
+[2026-08-18T09:43:22Z] Date coherence OK: obs2ioda input date matches 2026081800
+[2026-08-18T09:43:28Z] SUCCESS gdas2 2026081800: copied 13 HDF5 files to /scratch/lus/tmp/arw/day/jedi/r12
+[2026-08-18T09:43:28Z] Process gdas2 rc=0
+
+===============================================================================
+[2026-08-18T09:43:28Z] PROCESSING gdas3 slotdate=2026081806 stream=gfs
+===============================================================================
+[2026-08-18T09:43:28Z] Supported obs2ioda inputs:
+[2026-08-18T09:43:28Z]   prepbufr : gdas3.2026081806.gfs.t06z.prepbufr.nr
+[2026-08-18T09:43:28Z]   satwnd   : gdas3.2026081806.gfs.t06z.satwnd.tm00.bufr_d
+[2026-08-18T09:43:28Z]   gpsro    : gdas3.2026081806.gfs.t06z.gpsro.tm00.bufr_d.nr
+[2026-08-18T09:43:28Z]   amsua    : gdas3.2026081806.gfs.t06z.1bamua.tm00.bufr_d
+[2026-08-18T09:43:28Z]   mhs      : gdas3.2026081806.gfs.t06z.1bmhs.tm00.bufr_d
+[2026-08-18T09:43:28Z]   iasi     : gdas3.2026081806.gfs.t06z.mtiasi.tm00.bufr_d
+[2026-08-18T09:43:28Z] Executing obs2ioda_v3...
+  obs2ioda |  --- processing gnssro.bufr ---
+  obs2ioda | ./gnssro.bufr file date is: 2026081806
+  obs2ioda |  --- reading ./prepbufr.bufr ---
+  obs2ioda | obs_errtable file is found. Will use user-provided obs errors.
+  obs2ioda |  ./prepbufr.bufr file date is: 2026081806
+  obs2ioda |  num_report_infile ./prepbufr.bufr :       615212
+  obs2ioda |  --- applying some additional QC as in GSI read_prepbufr.f90 for the global mode
+  obs2ioda |  l ---
+  obs2ioda |  --- filtering conv obs ---
+  obs2ioda |  --- sorting conv obs...
+  obs2ioda |                           nrecs     nlocs
+  obs2ioda |  sondes                      70     10818
+  obs2ioda |  aircraft                  2260      2260
+  obs2ioda |  sfc                     158850    154724
+  obs2ioda |  satwind                 217651    217650
+  obs2ioda |  satwnd                       0         0
+  obs2ioda |  profiler                     1         8
+  obs2ioda |  ascat                   179837    179837
+  obs2ioda |  --- writing ./sondes_obs_2026081806.h5
+  obs2ioda |  --- writing ./aircraft_obs_2026081806.h5
+  obs2ioda |  --- writing ./sfc_obs_2026081806.h5
+  obs2ioda |  --- writing ./satwind_obs_2026081806.h5
+  obs2ioda |  --- writing ./profiler_obs_2026081806.h5
+  obs2ioda |  --- writing ./ascat_obs_2026081806.h5
+  obs2ioda |  --- reading ./satwnd.bufr ---
+  obs2ioda |  ./satwnd.bufr file date is: 2026081806
+  obs2ioda | obs_errtable file is found. Will use user-provided obs errors.
+  obs2ioda |  num_report_infile ./satwnd.bufr :    1334893
+  obs2ioda |  --- applying some additional QC as in GSI read_satwnd.f90 for the global model 
+  obs2ioda |  ---
+  obs2ioda |  --- sorting satwnd obs...
+  obs2ioda |                           nlocs
+  obs2ioda |  sondes                       0
+  obs2ioda |  aircraft                     0
+  obs2ioda |  sfc                          0
+  obs2ioda |  satwind                      0
+  obs2ioda |  satwnd                 1334893
+  obs2ioda |  profiler                     0
+  obs2ioda |  ascat                        0
+  obs2ioda |  --- writing ./satwnd_obs_2026081806.h5
+  obs2ioda |  --- reading ./amsua.bufr ---
+  obs2ioda |  ./amsua.bufr file date is: 2026081806
+  obs2ioda |  num_report_infile ./amsua.bufr :     126780
+  obs2ioda |  Warning: ./airs.bufr not found for decoding...
+  obs2ioda |  --- reading ./mhs.bufr ---
+  obs2ioda |  ./mhs.bufr file date is: 2026081806
+  obs2ioda |  num_report_infile ./mhs.bufr :    1129065
+  obs2ioda |  --- sorting radiance obs...
+  obs2ioda |                           nlocs
+  obs2ioda |  amsua_n15                    0
+  obs2ioda |  amsua_n18                    0
+  obs2ioda |  amsua_n19                    0
+  obs2ioda |  amsua_metop-a                0
+  obs2ioda |  amsua_metop-b            66272
+  obs2ioda |  amsua_metop-c            60508
+  obs2ioda |  amsua_aqua                   0
+  obs2ioda |  mhs_n18                      0
+  obs2ioda |  mhs_n19                      0
+  obs2ioda |  mhs_metop-a                  0
+  obs2ioda |  mhs_metop-b             596662
+  obs2ioda |  mhs_metop-c             532403
+  obs2ioda |  iasi_metop-a                 0
+  obs2ioda |  iasi_metop-b                 0
+  obs2ioda |  iasi_metop-c                 0
+  obs2ioda |  cris_npp                     0
+  obs2ioda |  cris_n20                     0
+  obs2ioda |  --- writing ./amsua_metop-b_obs_2026081806.h5
+  obs2ioda |  --- writing ./amsua_metop-c_obs_2026081806.h5
+  obs2ioda |  --- writing ./mhs_metop-b_obs_2026081806.h5
+  obs2ioda |  --- writing ./mhs_metop-c_obs_2026081806.h5
+  obs2ioda |  --- reading ./iasi.bufr ---
+  obs2ioda |  ./iasi.bufr file date is: 2026081806
+  obs2ioda |  num_report_infile ./iasi.bufr :     364348
+  obs2ioda |  Warning: ./cris.bufr not found for decoding...
+  obs2ioda |  --- sorting radiance obs...
+  obs2ioda |                           nlocs
+  obs2ioda |  amsua_n15                    0
+  obs2ioda |  amsua_n18                    0
+  obs2ioda |  amsua_n19                    0
+  obs2ioda |  amsua_metop-a                0
+  obs2ioda |  amsua_metop-b                0
+  obs2ioda |  amsua_metop-c                0
+  obs2ioda |  amsua_aqua                   0
+  obs2ioda |  mhs_n18                      0
+  obs2ioda |  mhs_n19                      0
+  obs2ioda |  mhs_metop-a                  0
+  obs2ioda |  mhs_metop-b                  0
+  obs2ioda |  mhs_metop-c                  0
+  obs2ioda |  iasi_metop-a                 0
+  obs2ioda |  iasi_metop-b            261499
+  obs2ioda |  iasi_metop-c            102354
+  obs2ioda |  cris_npp                     0
+  obs2ioda |  cris_n20                     0
+  obs2ioda |  --- reading ./iasi_metop-b.SpcCoeff.bin
+  obs2ioda |  --- converting radiance to brightness temperature... 
+  obs2ioda |  --- reading ./iasi_metop-c.SpcCoeff.bin
+  obs2ioda |  --- converting radiance to brightness temperature... 
+  obs2ioda |  --- writing ./iasi_metop-b_obs_2026081806.h5
+  obs2ioda |  --- writing ./iasi_metop-c_obs_2026081806.h5
+  obs2ioda |  all done!
+[2026-08-18T09:46:27Z] Date coherence OK: obs2ioda input date matches 2026081806
+[2026-08-18T09:46:30Z] SUCCESS gdas3 2026081806: copied 14 HDF5 files to /scratch/lus/tmp/arw/day/jedi/r12
+[2026-08-18T09:46:30Z] Process gdas3 rc=0
+
+===============================================================================
+[2026-08-18T09:46:30Z] FINAL SUMMARY
+===============================================================================
+[2026-08-18T09:46:30Z] HDF5 outputs in /scratch/lus/tmp/arw/day/jedi/r12:
+  aircraft_obs_2026081718.h5 419446 bytes
+  aircraft_obs_2026081800.h5 305462 bytes
+  aircraft_obs_2026081806.h5 399358 bytes
+  amsua_metop-b_obs_2026081718.h5 17841721 bytes
+  amsua_metop-b_obs_2026081800.h5 17841501 bytes
+  amsua_metop-b_obs_2026081806.h5 14596281 bytes
+  amsua_metop-c_obs_2026081718.h5 17838641 bytes
+  amsua_metop-c_obs_2026081800.h5 17840621 bytes
+  amsua_metop-c_obs_2026081806.h5 13328201 bytes
+  ascat_obs_2026081718.h5 26095982 bytes
+  ascat_obs_2026081800.h5 26150150 bytes
+  ascat_obs_2026081806.h5 20171830 bytes
+  gnssro_obs_2026081718.h5 111881809 bytes
+  gnssro_obs_2026081800.h5 106933745 bytes
+  gnssro_obs_2026081806.h5 78058569 bytes
+  iasi_metop-b_obs_2026081718.h5 2405525309 bytes
+  iasi_metop-b_obs_2026081800.h5 2398866237 bytes
+  iasi_metop-b_obs_2026081806.h5 1943485301 bytes
+  iasi_metop-c_obs_2026081718.h5 2404730085 bytes
+  iasi_metop-c_obs_2026081800.h5 2396985941 bytes
+  iasi_metop-c_obs_2026081806.h5 760719661 bytes
+  mhs_metop-b_obs_2026081718.h5 72929561 bytes
+  mhs_metop-b_obs_2026081800.h5 72921361 bytes
+  mhs_metop-b_obs_2026081806.h5 59682561 bytes
+  mhs_metop-c_obs_2026081718.h5 71653861 bytes
+  mhs_metop-c_obs_2026081800.h5 71408561 bytes
+  mhs_metop-c_obs_2026081806.h5 53256661 bytes
+  profiler_obs_2026081806.h5 15706 bytes
+  satwind_obs_2026081718.h5 19912227 bytes
+  satwind_obs_2026081800.h5 20936011 bytes
+  satwind_obs_2026081806.h5 24401603 bytes
+  satwnd_obs_2026081718.h5 355761913 bytes
+  satwnd_obs_2026081800.h5 288213561 bytes
+  satwnd_obs_2026081806.h5 144198573 bytes
+  sfc_obs_2026081718.h5 29447993 bytes
+  sfc_obs_2026081800.h5 28890621 bytes
+  sfc_obs_2026081806.h5 27877945 bytes
+  sondes_obs_2026081718.h5 3785358 bytes
+  sondes_obs_2026081800.h5 27185642 bytes
+  sondes_obs_2026081806.h5 1820998 bytes
+[2026-08-18T09:46:30Z] Total HDF5 output files: 40
+[2026-08-18T09:46:30Z] Cleaning work directory: /scratch/lus/tmp/arw/day/jedi/r12/work_obs_2026081812
+[2026-08-18T09:46:34Z] SUCCESS: all processable slots completed cleanly.
