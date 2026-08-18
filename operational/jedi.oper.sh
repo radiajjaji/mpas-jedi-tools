@@ -289,7 +289,16 @@ HH="${ANALYSIS_DATE:8:2}"
 ANL_TAG_H5="$ANALYSIS_DATE"
 ANL_ISO="$(iso_from_yyyymmddhh "$ANALYSIS_DATE")"
 
-JEDI_VAR_MODE=4D-FGAT-ENS
+# Select the DA mode here. This is intentionally defined inside the script so
+# submission-shell variables or command-line arguments cannot change the science mode.
+# Supported: 3DVAR, 3D-FGAT, 4D-FGAT, 4D-FGAT-ENS, 4D-ENS-VAR
+export JEDI_VAR_MODE=4DENSVAR
+
+# Select the variational geometry independently of the DA method.
+# Supported operational B-matrix/mesh resolutions: 12, 24, 30 km.
+# For 24/30 km the native background restart(s) are always remapped first.
+export JEDI_VAR_RESOLUTION=24
+
 JEDI_NINNER=50
 JEDI_GRADIENT_NORM_REDUCTION=1.0e-3
 JEDI_LINEAR_MODEL_NAME=Identity
@@ -335,8 +344,15 @@ ulimit -v unlimited
 ulimit -d unlimited
 ulimit -m unlimited 2>/dev/null || true
 
+# Mode flags are reset before dispatch so one mode can never inherit another mode's state.
+USE_FGAT_ENSEMBLE_B=0
+USE_4D_ENSEMBLE_TRAJECTORIES=0
+USE_LOWRES_GEOMETRY=0
+MODE_FAMILY=""
+
 case "$JEDI_VAR_MODE" in
   3DVAR|3D-VAR|3D-Var)
+    MODE_FAMILY="3DVAR"
     COST_TYPE="3D-Var"
     USE_MODEL_BLOCK=0
     USE_LINEAR_MODEL=0
@@ -345,6 +361,7 @@ case "$JEDI_VAR_MODE" in
     MPAS_NML_DATE="$ANALYSIS_DATE"
     ;;
   FGAT|3D-FGAT|3D_FGAT)
+    MODE_FAMILY="3D-FGAT"
     COST_TYPE="3D-FGAT"
     USE_MODEL_BLOCK=1
     USE_LINEAR_MODEL=0
@@ -353,6 +370,7 @@ case "$JEDI_VAR_MODE" in
     MPAS_NML_DATE="$WIN_BEG_DATE"
     ;;
   4DVAR|4D-VAR|4D-Var|4D_FGAT|4D-FGAT)
+    MODE_FAMILY="4D-FGAT"
     COST_TYPE="4D-Var"
     USE_MODEL_BLOCK=1
     USE_LINEAR_MODEL=1
@@ -367,6 +385,7 @@ case "$JEDI_VAR_MODE" in
     # members each contain states at T-3h, T, and T+3h. The ensemble trajectories
     # appear only under "background error"; they never replace the deterministic
     # 4D-Var background or nonlinear MPAS trajectory.
+    MODE_FAMILY="4D-FGAT-ENS"
     COST_TYPE="4D-Var"
     USE_MODEL_BLOCK=1
     USE_LINEAR_MODEL=1
@@ -379,6 +398,7 @@ case "$JEDI_VAR_MODE" in
     # Pure 4D-EnVar/4D-Ens-Var:
     # No MPAS trajectory is integrated inside the variational run.
     # The 4D information comes from precomputed ensemble states at T-3h, T, T+3h.
+    MODE_FAMILY="4D-ENS-VAR"
     COST_TYPE="4D-Ens-Var"
     USE_MODEL_BLOCK=0
     USE_LINEAR_MODEL=0
@@ -437,10 +457,27 @@ case "$MPAS_RESOLUTION" in
 esac
 
 # Preserve the native/source mesh metadata before selecting the lower-resolution
-# JEDI geometry. These values are used only by the mesh-remapping stage.
+# JEDI geometry. These values are used only by the target-resolution initialization stage.
 SOURCE_MPAS_RESOLUTION="$MPAS_RESOLUTION"
 SOURCE_XNN="$XNN"
 SOURCE_NUM="$NUM"
+SOURCE_DT="$DT"
+SOURCE_DX="$DX"
+
+# Resolution is independent of DA method.  A non-native target always requires
+# direct MPAS remap conversion of the deterministic state(s) before any JEDI application.
+case "$JEDI_VAR_RESOLUTION" in
+  12) TARGET_XNN=x1; TARGET_NUM=4096002; TARGET_DT=72.0;  TARGET_DX=12000.0; ENSEMBLE_MODEL_TSTEP=PT1M12S ;;
+  24) TARGET_XNN=x1; TARGET_NUM=1024002; TARGET_DT=144.0; TARGET_DX=24000.0; ENSEMBLE_MODEL_TSTEP=PT2M24S ;;
+  30) TARGET_XNN=x1; TARGET_NUM=655362;  TARGET_DT=180.0; TARGET_DX=30000.0; ENSEMBLE_MODEL_TSTEP=PT3M ;;
+  *) die "unsupported JEDI_VAR_RESOLUTION=$JEDI_VAR_RESOLUTION; use 12, 24, or 30" ;;
+esac
+
+if [ "$JEDI_VAR_RESOLUTION" = "$SOURCE_MPAS_RESOLUTION" ]; then
+  USE_LOWRES_GEOMETRY=0
+else
+  USE_LOWRES_GEOMETRY=1
+fi
 
 #-------------------------------------------------------------------------------
 # 6. Define directory layout, executables, static B files, CRTM files, and outputs.
@@ -449,13 +486,23 @@ SOURCE_NUM="$NUM"
 JEDI_ROOT="$DAY_ROOT/jedi/r${CYCLE_RUN}"
 LOGDIR="$MODEL_ROOT/log"
 RUNLOG="$LOGDIR/jedi.var.${RUN_DATE}.log"
-# One common runtime directory for both ensemble generation and variational DA.
-# All rendered YAML, namelist, stream, diagnostic, and log-support files remain
-# here for operational inspection. Ensemble NetCDF outputs still go to
-# ENSEMBLE_ROOT under $DAY_ROOT/ens.
-WORKDIR="$HOME/intel303/run"
+# Mode-isolated runtime tree.  Every DA family owns its own directory and
+# multi-stage modes receive one subdirectory per stage.  WORKDIR remains an
+# alias for the variational stage so legacy helper code cannot escape VAR_DIR.
+RUN_BASE="$HOME/intel303/run"
+MODE_DIR_NAME="$(printf '%s' "$MODE_FAMILY" | tr '[:upper:]' '[:lower:]')"
+MODE_WORKDIR="$RUN_BASE/$MODE_DIR_NAME/${JEDI_VAR_RESOLUTION}km"
+VAR_DIR="$MODE_WORKDIR/variational"
+REMAP_DIR="$MODE_WORKDIR/remap"
+ENS_DIR="$MODE_WORKDIR/ensembles"
+ANALYSIS_TO_NATIVE_DIR="$MODE_WORKDIR/analysis_to_12km"
+WORKDIR="$VAR_DIR"
 
-mkdir -p "$JEDI_ROOT" "$LOGDIR" "$WORKDIR" "$ASSIM_ROOT"
+mkdir -p "$JEDI_ROOT" "$LOGDIR" "$MODE_WORKDIR" "$VAR_DIR" "$ASSIM_ROOT"
+[ "$USE_LOWRES_GEOMETRY" = "1" ] && mkdir -p "$REMAP_DIR" "$ANALYSIS_TO_NATIVE_DIR"
+if [ "$USE_FGAT_ENSEMBLE_B" = "1" ] || [ "$USE_4D_ENSEMBLE_TRAJECTORIES" = "1" ]; then
+  mkdir -p "$ENS_DIR"
+fi
 : > "$RUNLOG"
 
 MPAS_ONLY_ROOT="$HOME/jedi/mpas_only/3.0.3"
@@ -472,7 +519,7 @@ MPASJEDI_GEN_ENS_EXE="$MPASJEDI_INSTALL/bin/mpasjedi_gen_ens_pert_B.x"
 PERT_TEMPLATE_SOURCE="$JEDI_NAME_DIR/pert.303.yaml"
 
 # Runtime copy kept beside gen_ens_pert_B.yaml and jedi.yaml.
-PERT_TEMPLATE_YAML="$WORKDIR/pert.303.yaml"
+PERT_TEMPLATE_YAML="$ENS_DIR/pert.303.yaml"
 
 #-------------------------------------------------------------------------------
 # MPAS-JEDI runtime library path is prepared by
@@ -481,72 +528,79 @@ PERT_TEMPLATE_YAML="$WORKDIR/pert.303.yaml"
 
 #-------------------------------------------------------------------------------
 
-# STDDEV_FILE is assigned after the low-resolution B root is selected below.
+# STDDEV_FILE is selected from the mode-specific B root below.
 
 # Native high-resolution restart inputs. They are never modified.
 SOURCE_BG_FILE="$ASSIM_ROOT/restart.${BG_YYYY}-${BG_MM}-${BG_DD}_${BG_HH}:00:00.nc"
 SOURCE_AN_GUESS_FILE="$ASSIM_ROOT/restart.${YYYY}-${MM}-${DD}_${HH}:00:00.nc"
+SOURCE_WIN_END_FILE="$ASSIM_ROOT/restart.${WIN_END_DATE:0:4}-${WIN_END_DATE:4:2}-${WIN_END_DATE:6:2}_${WIN_END_DATE:8:2}:00:00.nc"
 
 #-------------------------------------------------------------------------------
-# Low-resolution ensemble geometry.
+# Target variational geometry and B-matrix resources.
 #
-# This is the ONLY resolution selector for the downscaled ensemble workflow.
-# Set it here to either 24 or 30.  It is intentionally not inherited from the
-# submission environment.
+# JEDI_VAR_RESOLUTION is independent of JEDI_VAR_MODE.  The same selected
+# geometry is used by deterministic DA, hybrid FGAT, ensemble generation, and
+# 4D-EnVar.  If target != native source resolution, native states are converted with the direct MPAS remapper.
 #-------------------------------------------------------------------------------
 
-ENSEMBLE_LOWRESOLUTION=24
+ENSEMBLE_LOWRESOLUTION="$JEDI_VAR_RESOLUTION"
 
-JEDI_REMAP_ENABLE=1
-JEDI_REMAP_EXE="$HOME/mpas_mesh_remap_fast/mpas_mesh_remap"
-JEDI_REMAP_NEIGHBORS=4
-JEDI_REMAP_POWER=2.0
-JEDI_REMAP_THREADS="${SLURM_CPUS_PER_TASK:-8}"
-JEDI_REMAP_ROOT="$ASSIM_ROOT/remapped/${ENSEMBLE_LOWRESOLUTION}km"
+JEDI_INIT_CONVERT_ENABLE="$USE_LOWRES_GEOMETRY"
 
-case "$ENSEMBLE_LOWRESOLUTION" in
-  24)
-    TARGET_XNN=x1
-    TARGET_NUM=1024002
-    TARGET_DT=144.0
-    TARGET_DX=24000.0
-    ENSEMBLE_MODEL_TSTEP=PT2M24S
-    ;;
-  30)
-    TARGET_XNN=x1
-    TARGET_NUM=655362
-    TARGET_DT=180.0
-    TARGET_DX=30000.0
-    ENSEMBLE_MODEL_TSTEP=PT3M
-    ;;
-  *)
-    die "unsupported ENSEMBLE_LOWRESOLUTION=$ENSEMBLE_LOWRESOLUTION; use 24 or 30"
-    ;;
-esac
+# Direct native MPAS <-> MPAS remapping resources.
+MPAS_REMAP_DATA_ROOT="$MODEL_ROOT/src/mpas/remap"
+MPAS_REMAP_WEIGHT_ROOT="$MPAS_REMAP_DATA_ROOT/weights"
+MPAS_REMAP_TEMPLATE_ROOT="$MPAS_REMAP_DATA_ROOT/templates"
+MPAS_REMAP_GRID_ROOT="$MPAS_REMAP_DATA_ROOT/grids"
+MPAS_REMAP_EXE="$MODEL_ROOT/src/util/mpas_remap_state/mpas_remap_state"
+MPAS_REMAP_THREADS=64
 
-LOWRES_B_ROOT="$MPAS_ONLY_ROOT/${ENSEMBLE_LOWRESOLUTION}km"
-STDDEV_FILE="$LOWRES_B_ROOT/HDIAGS/merge/mpas.stddev.nc"
+TARGET_STATE_ROOT="$ASSIM_ROOT/remapped/${JEDI_VAR_RESOLUTION}km"
+INIT_PIPELINE_DIR="$REMAP_DIR"
+
+TARGET_B_ROOT="$MPAS_ONLY_ROOT/${JEDI_VAR_RESOLUTION}km"
+STDDEV_FILE="$TARGET_B_ROOT/HDIAGS/merge/mpas.stddev.nc"
 
 SOURCE_INVARIANT_FILE="$MODEL_ROOT/src/mpas/meshes/$SOURCE_MPAS_RESOLUTION/${SOURCE_XNN}.${SOURCE_NUM}.invariant.nc"
-TARGET_INVARIANT_FILE="$MODEL_ROOT/src/mpas/meshes/$ENSEMBLE_LOWRESOLUTION/${TARGET_XNN}.${TARGET_NUM}.invariant.nc"
+TARGET_INVARIANT_FILE="$MODEL_ROOT/src/mpas/meshes/$JEDI_VAR_RESOLUTION/${TARGET_XNN}.${TARGET_NUM}.invariant.nc"
 
-LOWRES_BG_FILE="$JEDI_REMAP_ROOT/restart.${BG_YYYY}-${BG_MM}-${BG_DD}_${BG_HH}:00:00.nc"
-LOWRES_AN_GUESS_FILE="$JEDI_REMAP_ROOT/restart.${YYYY}-${MM}-${DD}_${HH}:00:00.nc"
+TARGET_BG_FILE="$TARGET_STATE_ROOT/restart.${BG_YYYY}-${BG_MM}-${BG_DD}_${BG_HH}.00.00.nc"
+TARGET_AN_GUESS_FILE="$TARGET_STATE_ROOT/restart.${YYYY}-${MM}-${DD}_${HH}.00.00.nc"
+TARGET_WIN_END_FILE="$TARGET_STATE_ROOT/restart.${WIN_END_DATE:0:4}-${WIN_END_DATE:4:2}-${WIN_END_DATE:6:2}_${WIN_END_DATE:8:2}.00.00.nc"
 
-if [ "$JEDI_REMAP_ENABLE" = "1" ]; then
-  MPAS_RESOLUTION="$ENSEMBLE_LOWRESOLUTION"
+if [ "$JEDI_INIT_CONVERT_ENABLE" = "1" ]; then
+  MPAS_RESOLUTION="$JEDI_VAR_RESOLUTION"
   XNN="$TARGET_XNN"
   NUM="$TARGET_NUM"
   DT="$TARGET_DT"
   DX="$TARGET_DX"
-  BG_FILE="$LOWRES_BG_FILE"
-  AN_GUESS_FILE="$LOWRES_AN_GUESS_FILE"
+  BG_FILE="$TARGET_BG_FILE"
+
+  # Only pure 4D-Ens-Var consumes a precomputed deterministic trajectory at
+  # T-3h, T and T+3h.  Deterministic 3DVAR/3D-FGAT/4D-FGAT (and hybrid FGAT)
+  # consume one background state; MPAS generates any required trajectory.
+  if [ "$USE_4D_ENSEMBLE_TRAJECTORIES" = "1" ]; then
+    AN_GUESS_FILE="$TARGET_AN_GUESS_FILE"
+    WIN_END_FILE="$TARGET_WIN_END_FILE"
+  else
+    AN_GUESS_FILE="$SOURCE_AN_GUESS_FILE"
+    WIN_END_FILE="$SOURCE_WIN_END_FILE"
+  fi
+
+  INVARIANT_FILE="$TARGET_INVARIANT_FILE"
 else
+  MPAS_RESOLUTION="$SOURCE_MPAS_RESOLUTION"
+  XNN="$SOURCE_XNN"
+  NUM="$SOURCE_NUM"
+  DT="$SOURCE_DT"
+  DX="$SOURCE_DX"
   BG_FILE="$SOURCE_BG_FILE"
   AN_GUESS_FILE="$SOURCE_AN_GUESS_FILE"
+  WIN_END_FILE="$SOURCE_WIN_END_FILE"
+  INVARIANT_FILE="$SOURCE_INVARIANT_FILE"
 fi
 
-# Native middle-window restart used as the complete forecast-state template.
+# Native middle-window restart remains authoritative for the final native forecast analysis.
 
 # JEDI diagnostic analysis at the exact middle of the assimilation window.
 # JEDI writes this file through the analysis output stream; it is not linked here.
@@ -554,6 +608,12 @@ JEDI_MID_ANALYSIS_FILE="$ASSIM_ROOT/analysis.${YYYY}-${MM}-${DD}_${HH}.00.00.nc"
 
 # Final complete analysis used to initialize the subsequent forecast.
 AN_ANALYSIS_FILE="$ASSIM_ROOT/jedi_analysis.${YYYY}-${MM}-${DD}_${HH}.00.00.nc"
+
+# For low-resolution FGAT/4D-Var modes, JEDI writes the nonlinear background
+# trajectory.  The middle-window state is used only to reconstruct the DA
+# increment back on the native 12-km grid; it does not add another forward remap.
+BACKGROUND_TRAJECTORY_PREFIX="$VAR_DIR/background.fgat"
+BACKGROUND_TRAJECTORY_MID_FILE="$VAR_DIR/background.fgat.${YYYY}-${MM}-${DD}_${HH}.00.00.nc"
 
 # Parallel copy and field-merge controls.
 DCP_NODES=4
@@ -565,12 +625,11 @@ DCP_PROGRESS=10
 DCP_TMP_DIR="$ASSIM_ROOT/.jedi_dcp"
 JEDI_ANALYSIS_VARS=pressure_p,rho,qv,qc,qr,qi,qs,qg,surface_pressure,theta,u,uReconstructZonal,uReconstructMeridional
 
+# Direct remapping uses one node and 64 OpenMP threads per independent state.
+# In 4D-Ens-Var the T-3h/T/T+3h remaps are launched concurrently.
+MPAS_REMAP_NODES=1
+MPAS_REMAP_NTASKS=1
 
-if [ "$JEDI_REMAP_ENABLE" = "1" ]; then
-  INVARIANT_FILE="$TARGET_INVARIANT_FILE"
-else
-  INVARIANT_FILE="$SOURCE_INVARIANT_FILE"
-fi
 
 #CRTM_FIX_ROOT="${CRTM_FIX_ROOT:-$MPASJEDI_BUNDLE_ROOT/code/test-data-release/crtm/fix_REL-3.1.2.0/fix}"
 CRTM_COEFFS_SRC="$MPASJEDI_BUNDLE_ROOT/code/test-data-release/crtm/2.4.1_skylab_4.0"
@@ -590,12 +649,14 @@ configure_varbc_sensor() {
   local key="$1" sensor="$2"
   local bcoeff_store="$VARBC_BCOEFF_DIR/satbias_${sensor}.nc4"
   local cov_store="$VARBC_COV_DIR/satbias_cov_${sensor}.nc4"
-  local bcoeff_out="$WORKDIR/satbias_${sensor}.${ANL_TAG_H5}.nc4"
-  local cov_out="$WORKDIR/satbias_cov_${sensor}.${ANL_TAG_H5}.nc4"
+  local bcoeff_out="$VAR_DIR/satbias_${sensor}.${ANL_TAG_H5}.nc4"
+  local cov_out="$VAR_DIR/satbias_cov_${sensor}.${ANL_TAG_H5}.nc4"
   local bcoeff_input_block="" cov_prior_block="" mode="cold-start"
+  local bcoeff_in="" seed=""
 
   if [ -s "$bcoeff_store" ] && [ -s "$cov_store" ]; then
     mode="cycle"
+    bcoeff_in="$bcoeff_store"
     bcoeff_input_block="        input file: $bcoeff_store"
     cov_prior_block=$(cat <<EOF
           prior:
@@ -605,10 +666,22 @@ configure_varbc_sensor() {
               ratio for small dataset: 2.0
 EOF
 )
-  elif [ -e "$bcoeff_store" ] || [ -e "$cov_store" ]; then
-    log "WARNING: incomplete VarBC pair for $sensor; cold-starting both files"
+  else
+    # Restore the working cold-start behavior: use a real UFO satbias seed
+    # for the coefficients, but do not invent a covariance prior.
+    seed="$(find "$RAD_BIAS_ROOT" -maxdepth 1 -type f \
+      -name "satbias_${sensor}*.nc4" \
+      ! -name 'satbias_cov_*' ! -name 'out_satbias_*' \
+      | sort | head -1)"
+    [ -n "$seed" ] || die "no cold-start satbias seed found for $sensor in $RAD_BIAS_ROOT"
+    require_file "$seed"
+    bcoeff_in="$seed"
+    bcoeff_input_block="        input file: $seed"
+    cov_prior_block=""
+    mode="cold-start-seed"
   fi
 
+  printf -v "${key}_BIAS_IN" '%s' "$bcoeff_in"
   printf -v "${key}_BIAS_INPUT_BLOCK" '%s' "$bcoeff_input_block"
   printf -v "${key}_COV_PRIOR_BLOCK" '%s' "$cov_prior_block"
   printf -v "${key}_BIAS_OUT" '%s' "$bcoeff_out"
@@ -617,8 +690,8 @@ EOF
   printf -v "${key}_COV_STORE" '%s' "$cov_store"
   printf -v "${key}_VARBC_MODE" '%s' "$mode"
 
-  export "${key}_BIAS_INPUT_BLOCK" "${key}_COV_PRIOR_BLOCK"
-  log "VarBC $sensor: $mode"
+  export "${key}_BIAS_IN" "${key}_BIAS_INPUT_BLOCK" "${key}_COV_PRIOR_BLOCK"
+  log "VarBC $sensor: $mode; coefficient input=$bcoeff_in"
 }
 
 configure_varbc_sensor AMSUA_METOP_B amsua_metop-b
@@ -679,13 +752,14 @@ ENSEMBLE_ROOT="$DAY_ROOT/ens/${ENSEMBLE_LOWRESOLUTION}km/r${CYCLE_RUN}/${ANALYSI
 # Flow-dependent localization is retained separately.  If these ensemble states
 # are subsequently consumed on the low-resolution geometry, this directory must
 # contain localization files generated for the same mesh.
-ENSEMBLE_BUMPLOC_DATA_DIR="$LOWRES_B_ROOT/BUMPLOC"
+ENSEMBLE_BUMPLOC_DATA_DIR="$TARGET_B_ROOT/BUMPLOC"
 ENSEMBLE_BUMPLOC_FILES_PREFIX=mpas_bumploc
 
-# Static BUMP covariance/VBAL paths used by both deterministic static B and 4D-EnVar static component.
-STATIC_BUMPCOV_DATA_DIR="$LOWRES_B_ROOT/NICAS/merge"
+# Static B resources: native for ordinary variational modes; low-resolution only
+# for ensemble/hybrid modes. This prevents EnVar work from changing 4D-FGAT.
+STATIC_BUMPCOV_DATA_DIR="$TARGET_B_ROOT/NICAS/merge"
+STATIC_VBAL_DATA_DIR="$TARGET_B_ROOT/VBAL"
 STATIC_BUMPCOV_FILES_PREFIX=mpas
-STATIC_VBAL_DATA_DIR="$LOWRES_B_ROOT/VBAL"
 STATIC_STDDEV_FILE="$STDDEV_FILE"
 
 #-------------------------------------------------------------------------------
@@ -734,96 +808,237 @@ JEDI_ENABLE_CRIS_FSR_N20=1
 JEDI_ENABLE_SEVIRI_M11=1
 
 #-------------------------------------------------------------------------------
-# 7b. Convert native restart files to the selected lower-resolution MPAS mesh.
+# 7b. Build target-resolution MPAS restart states through direct conservative/
+#     smooth MPAS-to-MPAS remapping.
+#
+# No WPS intermediate and no init_atmosphere executable are used.
 #-------------------------------------------------------------------------------
 
-lowres_restart_is_usable() {
-  local file="$1"
+state_is_usable() {
+  local file="$1" expected_cells="$2"
+
   [ -s "$file" ] || return 1
   ncdump -h "$file" >/dev/null 2>&1 || return 1
-  ncdump -h "$file" 2>/dev/null | grep -q "nCells = ${TARGET_NUM}" || return 1
-  ncdump -h "$file" 2>/dev/null | grep -q "nEdges =" || return 1
+  ncdump -h "$file" 2>/dev/null | grep -q "nCells = ${expected_cells}" || return 1
+  ncdump -h "$file" 2>/dev/null | grep -q "nVertLevels = 56" || return 1
+  ncdump -h "$file" 2>/dev/null | grep -Eq '[[:space:]]rho\(Time, nCells, nVertLevels\)' || return 1
+  ncdump -h "$file" 2>/dev/null | grep -Eq '[[:space:]]theta\(Time, nCells, nVertLevels\)' || return 1
+  ncdump -h "$file" 2>/dev/null | grep -Eq '[[:space:]]qv\(Time, nCells, nVertLevels\)' || return 1
+  ncdump -h "$file" 2>/dev/null | grep -Eq '[[:space:]]qc\(Time, nCells, nVertLevels\)' || return 1
+  ncdump -h "$file" 2>/dev/null | grep -Eq '[[:space:]]qi\(Time, nCells, nVertLevels\)' || return 1
+  ncdump -h "$file" 2>/dev/null | grep -Eq '[[:space:]]qr\(Time, nCells, nVertLevels\)' || return 1
+  ncdump -h "$file" 2>/dev/null | grep -Eq '[[:space:]]qs\(Time, nCells, nVertLevels\)' || return 1
+  ncdump -h "$file" 2>/dev/null | grep -Eq '[[:space:]]qg\(Time, nCells, nVertLevels\)' || return 1
+  ncdump -h "$file" 2>/dev/null | grep -Eq '[[:space:]]u\(Time, nEdges, nVertLevels\)' || return 1
+  ncdump -h "$file" 2>/dev/null | grep -Eq '[[:space:]]w\(Time, nCells, nVertLevelsP1\)' || return 1
+  ncdump -h "$file" 2>/dev/null | grep -Eq '[[:space:]]surface_pressure\(Time, nCells\)' || return 1
+  ncdump -h "$file" 2>/dev/null | grep -Eq '[[:space:]]uReconstructZonal\(Time, nCells, nVertLevels\)' || return 1
+  ncdump -h "$file" 2>/dev/null | grep -Eq '[[:space:]]uReconstructMeridional\(Time, nCells, nVertLevels\)' || return 1
   return 0
 }
 
-remap_restart_one_node() {
+remap_weight_file() {
+  local source_num="$1" target_num="$2" kind="$3"
+  printf '%s/x1.%s_to_x1.%s.%s.nc\n' \
+    "$MPAS_REMAP_WEIGHT_ROOT" "$source_num" "$target_num" "$kind"
+}
+
+target_restart_template() {
+  local target_resolution="$1" target_num="$2"
+
+  case "$target_resolution" in
+    24|30)
+      printf '%s/restart.%skm.x1.%s.template.nc\n' \
+        "$MPAS_REMAP_TEMPLATE_ROOT" "$target_resolution" "$target_num"
+      ;;
+    *)
+      die "No permanent restart template configured for target ${target_resolution} km"
+      ;;
+  esac
+}
+
+build_state_via_remap() {
   local source_file="$1"
-  local target_file="$2"
-  local label="$3"
-  local target_tmp="${target_file}.tmp.${SLURM_JOB_ID:-$$}"
+  local dt="$2"
+  local source_num="$3"
+  local target_num="$4"
+  local target_template="$5"
+  local target_file="$6"
+  local run_dir="$7"
+
+  local smooth_weights
+  local conserve_weights
+  local target_tmp
+  local remap_rc
+
+  smooth_weights="$(remap_weight_file "$source_num" "$target_num" smooth)"
+  conserve_weights="$(remap_weight_file "$source_num" "$target_num" conserve)"
+  target_tmp="$run_dir/remap.${dt}.${SLURM_JOB_ID:-$$}.nc"
 
   require_file "$source_file"
-  require_file "$SOURCE_INVARIANT_FILE"
-  require_file "$TARGET_INVARIANT_FILE"
-  require_file "$JEDI_REMAP_EXE"
+  require_file "$target_template"
+  require_file "$smooth_weights"
+  require_file "$conserve_weights"
+  require_file "$MPAS_REMAP_EXE"
 
-  mkdir -p "$(dirname "$target_file")"
+  mkdir -p "$run_dir" "$(dirname "$target_file")"
 
-  if lowres_restart_is_usable "$target_file" && [ "$target_file" -nt "$source_file" ]; then
-    log "Reusing current low-resolution $label: $target_file"
+  if state_is_usable "$target_file" "$target_num" && \
+     [ "$target_file" -nt "$source_file" ]; then
+    log "Reusing valid direct-remapped state: $target_file"
     return 0
   fi
 
   rm -f "$target_tmp"
 
-  log "Remapping $label on one node"
-  log "Source restart: $source_file"
-  log "Source mesh:    $SOURCE_INVARIANT_FILE"
-  log "Target mesh:    $TARGET_INVARIANT_FILE"
-  log "Target restart: $target_file"
-  log "OpenMP threads: $JEDI_REMAP_THREADS"
+  log "Direct MPAS remap: ${source_num} cells -> ${target_num} cells"
+  log "Source state:          $source_file"
+  log "Target template:       $target_template"
+  log "Smooth weights:        $smooth_weights"
+  log "Conservative weights:  $conserve_weights"
+  log "Target state:          $target_file"
 
-  remap_cmd=(
-    srun
-    --exclusive
-    -N 1
-    -n 1
-    --cpus-per-task="$JEDI_REMAP_THREADS"
-    --cpu-bind=cores
-    "$JEDI_REMAP_EXE"
-    --source-mesh "$SOURCE_INVARIANT_FILE"
-    --source-core "$source_file"
-    --target-mesh "$TARGET_INVARIANT_FILE"
-    --output "$target_tmp"
-    --neighbors "$JEDI_REMAP_NEIGHBORS"
-    --power "$JEDI_REMAP_POWER"
-    --verbose
+  (
+    export OMP_NUM_THREADS="$MPAS_REMAP_THREADS"
+    export OMP_DYNAMIC=FALSE
+    unset OMP_PROC_BIND
+    unset OMP_PLACES
+
+    set +e
+    srun --exclusive \
+      -N "$MPAS_REMAP_NODES" \
+      -n "$MPAS_REMAP_NTASKS" \
+      --cpus-per-task="$MPAS_REMAP_THREADS" \
+      --cpu-bind=cores \
+      "$MPAS_REMAP_EXE" \
+      "$source_file" \
+      "$target_template" \
+      "$smooth_weights" \
+      "$conserve_weights" \
+      "$target_tmp" \
+      > "$run_dir/remap.out" 2>&1
+    remap_rc=$?
+    echo "mpas_remap_state rc=$remap_rc" >> "$run_dir/remap.out"
+    [ "$remap_rc" -eq 0 ] || return "$remap_rc"
   )
+  remap_rc=$?
 
-  set +e
-  OMP_NUM_THREADS="$JEDI_REMAP_THREADS" \
-  OMP_PLACES=cores \
-  OMP_PROC_BIND=spread \
-  KMP_BLOCKTIME=0 \
-    "${remap_cmd[@]}"
-  local rc=$?
-  set -e
+  [ "$remap_rc" -eq 0 ] || \
+    die "direct MPAS remap failed for $source_file with rc=$remap_rc; see $run_dir/remap.out"
 
-  [ "$rc" -eq 0 ] || die "MPAS remapping failed for $label with rc=$rc"
-  lowres_restart_is_usable "$target_tmp" || \
-    die "remapped $label is missing, unreadable, or has the wrong nCells: $target_tmp"
+  state_is_usable "$target_tmp" "$target_num" || \
+    die "direct remapper did not produce a valid target state for $dt"
 
+  rm -f "$target_file"
   mv -f "$target_tmp" "$target_file"
-  require_file "$target_file"
-  log "Completed low-resolution $label: $target_file"
+
+  state_is_usable "$target_file" "$target_num" || \
+    die "installed direct-remapped state is invalid: $target_file"
+
+  log "Completed direct MPAS remap: $target_file"
 }
 
-prepare_low_resolution_restarts() {
-  [ "$JEDI_REMAP_ENABLE" = "1" ] || {
-    log "JEDI restart remapping disabled; using native mesh"
+build_target_state() {
+  local source_file="$1"
+  local dt="$2"
+  local target_file="$3"
+  local task_dir="$4"
+  local target_template
+
+  target_template="$(target_restart_template "$JEDI_VAR_RESOLUTION" "$TARGET_NUM")"
+
+  build_state_via_remap \
+    "$source_file" "$dt" \
+    "$SOURCE_NUM" "$TARGET_NUM" \
+    "$target_template" "$target_file" "$task_dir"
+}
+
+prepare_target_initial_states() {
+  [ "$JEDI_INIT_CONVERT_ENABLE" = "1" ] || {
+    log "Target-resolution conversion disabled; using native ${SOURCE_MPAS_RESOLUTION}-km restart"
     return 0
   }
 
-  command -v ncdump >/dev/null 2>&1 || die "ncdump is required for remap validation"
+  command -v ncdump >/dev/null 2>&1 || \
+    die "ncdump is required for direct-remap validation"
 
-  remap_restart_one_node "$SOURCE_BG_FILE" "$LOWRES_BG_FILE" \
-    "window-start background"
+  require_file "$MPAS_REMAP_EXE"
+  require_file "$TARGET_INVARIANT_FILE"
+  require_file "$SOURCE_BG_FILE"
+  require_file "$SOURCE_AN_GUESS_FILE"
 
-  # The middle-window state is required later as the complete template into
-  # which JEDI diagnostic analysis fields are merged. It must therefore use
-  # the same target mesh as the variational geometry and ensemble members.
-  remap_restart_one_node "$SOURCE_AN_GUESS_FILE" "$LOWRES_AN_GUESS_FILE" \
-    "middle-window restart"
+  local target_template
+  target_template="$(target_restart_template "$JEDI_VAR_RESOLUTION" "$TARGET_NUM")"
+  require_file "$target_template"
+
+  require_file "$(remap_weight_file "$SOURCE_NUM" "$TARGET_NUM" smooth)"
+  require_file "$(remap_weight_file "$SOURCE_NUM" "$TARGET_NUM" conserve)"
+  require_file "$(remap_weight_file "$TARGET_NUM" "$SOURCE_NUM" smooth)"
+  require_file "$(remap_weight_file "$TARGET_NUM" "$SOURCE_NUM" conserve)"
+
+  local d0="$INIT_PIPELINE_DIR/background"
+  local d1="$INIT_PIPELINE_DIR/analysis"
+  local d2="$INIT_PIPELINE_DIR/tplus3"
+  mkdir -p "$d0" "$d1"
+
+  if [ "$USE_4D_ENSEMBLE_TRAJECTORIES" = "1" ]; then
+    log "Starting 3 parallel target-resolution direct MPAS remaps"
+    log "Each remap: 1 node, ${MPAS_REMAP_THREADS} OpenMP threads"
+  else
+    log "Starting target-resolution direct MPAS remap pipeline(s)"
+  fi
+
+  build_target_state "$SOURCE_BG_FILE" "$BG_DATE" "$TARGET_BG_FILE" "$d0" \
+    > "$d0/pipeline.out" 2>&1 &
+  local pid0=$!
+
+  local pid1=""
+  if [ "$SOURCE_AN_GUESS_FILE" = "$SOURCE_BG_FILE" ]; then
+    log "Window-start and analysis-time source are identical; one remap is sufficient"
+  else
+    build_target_state "$SOURCE_AN_GUESS_FILE" "$ANALYSIS_DATE" \
+      "$TARGET_AN_GUESS_FILE" "$d1" > "$d1/pipeline.out" 2>&1 &
+    pid1=$!
+  fi
+
+  local pid2=""
+  if [ "$USE_4D_ENSEMBLE_TRAJECTORIES" = "1" ]; then
+    require_file "$SOURCE_WIN_END_FILE"
+    mkdir -p "$d2"
+    build_target_state "$SOURCE_WIN_END_FILE" "$WIN_END_DATE" \
+      "$TARGET_WIN_END_FILE" "$d2" > "$d2/pipeline.out" 2>&1 &
+    pid2=$!
+  fi
+
+  local rc0=0 rc1=0 rc2=0
+  wait "$pid0"; rc0=$?
+  [ "$rc0" -eq 0 ] || \
+    die "window-start direct remap failed with rc=$rc0; see $d0/pipeline.out"
+
+  if [ -n "$pid1" ]; then
+    wait "$pid1"; rc1=$?
+    [ "$rc1" -eq 0 ] || \
+      die "analysis-time direct remap failed with rc=$rc1; see $d1/pipeline.out"
+  else
+    rm -f "$TARGET_AN_GUESS_FILE"
+    ln -s "$TARGET_BG_FILE" "$TARGET_AN_GUESS_FILE"
+  fi
+
+  if [ -n "$pid2" ]; then
+    wait "$pid2"; rc2=$?
+    [ "$rc2" -eq 0 ] || \
+      die "T+3 direct remap failed with rc=$rc2; see $d2/pipeline.out"
+  fi
+
+  state_is_usable "$TARGET_BG_FILE" "$TARGET_NUM" || \
+    die "target variational restart failed validation: $TARGET_BG_FILE"
+  state_is_usable "$TARGET_AN_GUESS_FILE" "$TARGET_NUM" || \
+    die "target analysis-time restart failed validation: $TARGET_AN_GUESS_FILE"
+
+  if [ "$USE_4D_ENSEMBLE_TRAJECTORIES" = "1" ]; then
+    state_is_usable "$TARGET_WIN_END_FILE" "$TARGET_NUM" || \
+      die "target T+3 restart failed validation: $TARGET_WIN_END_FILE"
+  fi
 }
 
 validate_netcdf_target_cells() {
@@ -845,17 +1060,26 @@ validate_netcdf_target_cells() {
 
 require_file "$MPASJEDI_EXE"
 require_file "$SOURCE_BG_FILE"
-require_file "$SOURCE_AN_GUESS_FILE"
 require_file "$SOURCE_INVARIANT_FILE"
-if [ "$JEDI_REMAP_ENABLE" = "1" ]; then
+if [ "$JEDI_INIT_CONVERT_ENABLE" != "1" ] || [ "$USE_4D_ENSEMBLE_TRAJECTORIES" = "1" ]; then
+  require_file "$SOURCE_AN_GUESS_FILE"
+fi
+if [ "$JEDI_INIT_CONVERT_ENABLE" = "1" ]; then
   require_file "$TARGET_INVARIANT_FILE"
-  require_file "$JEDI_REMAP_EXE"
+  require_file "$MPAS_REMAP_EXE"
+  require_dir "$MPAS_REMAP_WEIGHT_ROOT"
+  require_dir "$MPAS_REMAP_TEMPLATE_ROOT"
 fi
 
-prepare_low_resolution_restarts
+if [ "$JEDI_INIT_CONVERT_ENABLE" = "1" ]; then
+  safe_clean_workdir "$REMAP_DIR"
+fi
+prepare_target_initial_states
 
 require_file "$BG_FILE"
-require_file "$AN_GUESS_FILE"
+if [ "$JEDI_INIT_CONVERT_ENABLE" != "1" ] || [ "$USE_4D_ENSEMBLE_TRAJECTORIES" = "1" ]; then
+  require_file "$AN_GUESS_FILE"
+fi
 require_file "$INVARIANT_FILE"
 require_file "$TEMPLATE_YAML"
 require_file "$JEDI_NAME_DIR/namelist.atmosphere"
@@ -906,16 +1130,11 @@ fi
 # 9. Prepare the work directory and link/copy all MPAS-JEDI runtime inputs.
 #-------------------------------------------------------------------------------
 
-safe_clean_workdir "$WORKDIR"
-cd "$WORKDIR" || die "cannot enter runtime directory: $WORKDIR"
-
-# Keep the exact ensemble-generator template used by this cycle in the common
-# MPAS-JEDI runtime directory. Rendering is always performed from this local
-# copy, never from the ensemble-output tree.
+safe_clean_workdir "$VAR_DIR"
 if [ "$USE_FGAT_ENSEMBLE_B" = "1" ] || [ "$USE_4D_ENSEMBLE_TRAJECTORIES" = "1" ]; then
-  cp -p "$PERT_TEMPLATE_SOURCE" "$PERT_TEMPLATE_YAML"
-  require_file "$PERT_TEMPLATE_YAML"
+  safe_clean_workdir "$ENS_DIR"
 fi
+cd "$VAR_DIR" || die "cannot enter variational runtime directory: $VAR_DIR"
 
 log "RUN_DATE=$RUN_DATE"
 log "ANALYSIS_DATE=$ANALYSIS_DATE"
@@ -925,20 +1144,27 @@ log "WIN_BEG_ISO=$WIN_BEG_ISO"
 log "JEDI_VAR_MODE=$JEDI_VAR_MODE COST_TYPE=$COST_TYPE OUTER_LOOP_COUNT=$OUTER_LOOP_COUNT"
 log "SOURCE_BG_FILE=$SOURCE_BG_FILE"
 log "SOURCE_AN_GUESS_FILE=$SOURCE_AN_GUESS_FILE"
-log "JEDI_REMAP_ENABLE=$JEDI_REMAP_ENABLE"
-log "ENSEMBLE_LOWRESOLUTION=$ENSEMBLE_LOWRESOLUTION"
-log "LOWRES_B_ROOT=$LOWRES_B_ROOT"
+log "JEDI_INIT_CONVERT_ENABLE=$JEDI_INIT_CONVERT_ENABLE"
+log "JEDI_VAR_RESOLUTION=$JEDI_VAR_RESOLUTION"
+log "TARGET_B_ROOT=$TARGET_B_ROOT"
 log "ENSEMBLE_MODEL_TSTEP=$ENSEMBLE_MODEL_TSTEP"
 log "SOURCE_INVARIANT_FILE=$SOURCE_INVARIANT_FILE"
 log "TARGET_INVARIANT_FILE=$TARGET_INVARIANT_FILE"
 log "BG_FILE=$BG_FILE"
 log "AN_GUESS_FILE=$AN_GUESS_FILE"
+log "WIN_END_FILE=$WIN_END_FILE"
 log "JEDI_MID_ANALYSIS_FILE=$JEDI_MID_ANALYSIS_FILE"
 log "AN_ANALYSIS_FILE=$AN_ANALYSIS_FILE"
-log "WORKDIR=$WORKDIR"
-log "All MPAS-JEDI applications run from $WORKDIR"
+log "MODE_WORKDIR=$MODE_WORKDIR"
+log "VAR_DIR=$VAR_DIR"
+[ "$USE_LOWRES_GEOMETRY" = "1" ] && log "REMAP_DIR=$REMAP_DIR"
+[ "$USE_LOWRES_GEOMETRY" = "1" ] && log "ANALYSIS_TO_NATIVE_DIR=$ANALYSIS_TO_NATIVE_DIR"
+if [ "$USE_FGAT_ENSEMBLE_B" = "1" ] || [ "$USE_4D_ENSEMBLE_TRAJECTORIES" = "1" ]; then
+  log "ENS_DIR=$ENS_DIR"
+fi
 log "TEMPLATE_YAML=$TEMPLATE_YAML"
-if [ -e "$PERT_TEMPLATE_YAML" ]; then
+if [ "$USE_FGAT_ENSEMBLE_B" = "1" ] || [ "$USE_4D_ENSEMBLE_TRAJECTORIES" = "1" ]; then
+  log "PERT_TEMPLATE_SOURCE=$PERT_TEMPLATE_SOURCE"
   log "PERT_TEMPLATE_YAML=$PERT_TEMPLATE_YAML"
 fi
 log "VARBC_ROOT=$VARBC_ROOT"
@@ -957,8 +1183,16 @@ if [ "$USE_FGAT_ENSEMBLE_B" = "1" ] || [ "$USE_4D_ENSEMBLE_TRAJECTORIES" = "1" ]
   log "ENSEMBLE_BUMPLOC=$ENSEMBLE_BUMPLOC_DATA_DIR/$ENSEMBLE_BUMPLOC_FILES_PREFIX"
 fi
 
-link_file "$BG_FILE"        restart.nc
-link_file "$BG_FILE"        init.nc
+# Runtime initialization semantics are resolution-dependent.
+# Native 12-km states are genuine MPAS restart files. Remapped 24/30-km
+# states have INIT-like structure and must be consumed through the input stream.
+if [ "$JEDI_VAR_RESOLUTION" -eq 12 ]; then
+  link_file "$BG_FILE" restart.nc
+else
+  link_file "$BG_FILE" init.nc
+fi
+
+# These links are required by JEDI independently of MPAS restart/INIT semantics.
 link_file "$BG_FILE"        background.nc
 link_file "$BG_FILE"        "templateFields.${NUM}.nc"
 link_file "$STDDEV_FILE"    control.nc
@@ -1016,12 +1250,64 @@ sed \
   -e "s|MPAS_RESOLUTION|$MPAS_RESOLUTION|g" \
   "$JEDI_NAME_DIR/streams.atmosphere" > streams.atmosphere
 
-# NCAR-style nonlinear trajectory initialization requires a native restart stream.
-require_file restart.nc
-grep -q 'name="restart"' streams.atmosphere || die "rendered streams.atmosphere has no restart stream"
-grep -q 'filename_template="restart.nc"' streams.atmosphere || die "restart stream does not point to restart.nc"
-grep -q 'config_do_restart[[:space:]]*=[[:space:]]*true' namelist.atmosphere || \
-  die "rendered namelist.atmosphere is not configured for restart initialization"
+if [ "$JEDI_VAR_RESOLUTION" -eq 12 ]; then
+  # Proven native-resolution path: genuine MPAS restart semantics.
+  require_file restart.nc
+  grep -q 'name="restart"' streams.atmosphere || \
+    die "rendered streams.atmosphere has no restart stream"
+  grep -q 'filename_template="restart.nc"' streams.atmosphere || \
+    die "restart stream does not point to restart.nc"
+  grep -q 'config_do_restart[[:space:]]*=[[:space:]]*true' namelist.atmosphere || \
+    die "rendered namelist.atmosphere is not configured for restart initialization"
+  log "MPAS initialization mode: native restart"
+else
+  # Remapped 24/30-km states have INIT-like structure. Start from the same
+  # canonical templates, then apply only the minimum resolution-specific edits.
+  require_file init.nc
+
+  sed -E -i \
+    's|^([[:space:]]*config_do_restart[[:space:]]*=[[:space:]]*)true([[:space:]]*,?[[:space:]]*)$|\1false\2|' \
+    namelist.atmosphere
+
+  # Remove only the immutable restart stream block. With config_do_restart=false
+  # MPAS must initialize through the canonical input stream instead.
+  awk '
+    BEGIN {skip=0}
+    /<immutable_stream[[:space:]]+name="restart"/ {skip=1}
+    skip && /\/>/ {skip=0; next}
+    !skip {print}
+  ' streams.atmosphere > streams.atmosphere.init.tmp || \
+    die "failed to remove restart stream for low-resolution INIT mode"
+  mv -f streams.atmosphere.init.tmp streams.atmosphere
+
+  # Retarget only the canonical immutable input stream from templateFields.NUM.nc
+  # to the remapped INIT-like state. Other streams remain exactly as templated.
+  awk '
+    BEGIN {in_input=0}
+    /<immutable_stream[[:space:]]+name="input"/ {in_input=1}
+    in_input && /filename_template=/ {
+      sub(/filename_template="[^"]*"/, "filename_template=\"init.nc\"")
+    }
+    {print}
+    in_input && /\/>/ {in_input=0}
+  ' streams.atmosphere > streams.atmosphere.input.tmp || \
+    die "failed to retarget input stream to init.nc"
+  mv -f streams.atmosphere.input.tmp streams.atmosphere
+
+  grep -q 'config_do_restart[[:space:]]*=[[:space:]]*false' namelist.atmosphere || \
+    die "low-resolution namelist did not switch config_do_restart to false"
+  if grep -q 'name="restart"' streams.atmosphere; then
+    die "low-resolution streams still contain restart stream"
+  fi
+  grep -q 'name="input"' streams.atmosphere || \
+    die "low-resolution streams have no immutable input stream"
+  grep -q 'filename_template="init.nc"' streams.atmosphere || \
+    die "low-resolution input stream does not point to init.nc"
+  grep -Fq "filename_template=\"$INVARIANT_FILE\"" streams.atmosphere || \
+    die "low-resolution invariant stream does not point to target invariant"
+
+  log "MPAS initialization mode: target invariant + INIT-like target INIT state"
+fi
 
 #-------------------------------------------------------------------------------
 # 11a. Static B and 4D-EnVar YAML helpers.
@@ -1088,6 +1374,11 @@ EOF
     - rho
     - u
     - qv
+    - qc
+    - qi
+    - qr
+    - qs
+    - qg
     - pressure
     - landmask
     - xice
@@ -1176,11 +1467,18 @@ EOF
 }
 
 make_4densvar_background_block() {
+  local stvars_yaml
+
+  # state_variables_yaml() is intentionally kept unchanged because it is shared
+  # by other working modes.  Only 4D-Ens-Var needs two additional spaces here:
+  # the list is the value of "state variables:" inside the first state item.
+  stvars_yaml="$(state_variables_yaml | sed 's/^/  /')"
+
   cat <<EOF
   background:
     states:
     - state variables: &stvars
-$(state_variables_yaml)
+${stvars_yaml}
       filename: "./background_t0.nc"
       date: '${WIN_BEG_ISO}'
       stream name: background
@@ -1207,6 +1505,11 @@ make_static_background_error_block() {
       - temperature
       - spechum
       - surface_pressure
+      - qc
+      - qi
+      - qr
+      - qs
+      - qg
       read:
         nearest 3d level: bottom
         model:
@@ -1225,6 +1528,11 @@ make_static_background_error_block() {
             - velocity_potential
             - temperature
             - spechum
+            - qc
+            - qi
+            - qr
+            - qs
+            - qg
             nearest 3d level: bottom
         - model:
             variables:
@@ -1334,6 +1642,11 @@ make_hybrid_background_error_block() {
           - temperature
           - spechum
           - surface_pressure
+          - qc
+          - qi
+          - qr
+          - qs
+          - qg
           read:
             nearest 3d level: bottom
             model:
@@ -1352,6 +1665,11 @@ make_hybrid_background_error_block() {
                 - velocity_potential
                 - temperature
                 - spechum
+                - qc
+                - qi
+                - qr
+                - qs
+                - qg
                 nearest 3d level: bottom
             - model:
                 variables:
@@ -1455,6 +1773,21 @@ ensemble_is_complete() {
   [ "$missing" -eq 0 ]
 }
 
+prepare_ensemble_runtime() {
+  [ "$USE_FGAT_ENSEMBLE_B" = "1" ] || \
+  [ "$USE_4D_ENSEMBLE_TRAJECTORIES" = "1" ] || return 0
+
+  safe_clean_workdir "$ENS_DIR"
+
+  # Copy the small runtime configuration and symlink-based inputs from the
+  # variational stage.  Large MPAS/CRTM resources remain symlinks.
+  cp -a "$VAR_DIR"/. "$ENS_DIR"/
+  cp -p "$PERT_TEMPLATE_SOURCE" "$PERT_TEMPLATE_YAML"
+  require_file "$PERT_TEMPLATE_YAML"
+
+  log "Prepared ensemble runtime: $ENS_DIR"
+}
+
 render_ensemble_pert_yaml() {
   [ "$USE_FGAT_ENSEMBLE_B" = "1" ] || \
   [ "$USE_4D_ENSEMBLE_TRAJECTORIES" = "1" ] || return 0
@@ -1477,9 +1810,9 @@ render_ensemble_pert_yaml() {
     mkdir -p "$ENSEMBLE_ROOT/mem${i}"
   done
 
-  [ "$PWD" = "$WORKDIR" ] ||     die "ensemble YAML must be rendered from WORKDIR=$WORKDIR; current directory is $PWD"
+  [ "$PWD" = "$ENS_DIR" ] || die "ensemble YAML must be rendered from ENS_DIR=$ENS_DIR; current directory is $PWD"
 
-  log "Rendering $WORKDIR/gen_ens_pert_B.yaml from $PERT_TEMPLATE_YAML"
+  log "Rendering $ENS_DIR/gen_ens_pert_B.yaml from $PERT_TEMPLATE_YAML"
 
   sed \
     -e "s|__BG_ISO__|$BG_ISO|g" \
@@ -1529,10 +1862,10 @@ render_ensemble_pert_yaml() {
 
   # Keep the runtime YAML in WORKDIR for inspection. Also archive an exact
   # cycle copy beside the ensemble output without changing directories.
-  cp -p "$WORKDIR/gen_ens_pert_B.yaml"     "$ENSEMBLE_ROOT/gen_ens_pert_B.yaml"
+  cp -p "$ENS_DIR/gen_ens_pert_B.yaml" "$ENSEMBLE_ROOT/gen_ens_pert_B.yaml"
 
-  require_file "$WORKDIR/pert.303.yaml"
-  require_file "$WORKDIR/gen_ens_pert_B.yaml"
+  require_file "$ENS_DIR/pert.303.yaml"
+  require_file "$ENS_DIR/gen_ens_pert_B.yaml"
 }
 
 validate_generated_ensemble() {
@@ -1551,8 +1884,11 @@ run_ensemble_generation() {
   [ "$USE_FGAT_ENSEMBLE_B" = "1" ] || \
   [ "$USE_4D_ENSEMBLE_TRAJECTORIES" = "1" ] || return 0
 
-  cd "$WORKDIR" || \
-    die "cannot enter ensemble-generation runtime directory: $WORKDIR"
+  cd "$ENS_DIR" || \
+    die "cannot enter ensemble-generation runtime directory: $ENS_DIR"
+
+  prepare_ensemble_runtime
+  cd "$ENS_DIR" || die "cannot enter ensemble runtime directory: $ENS_DIR"
 
   log "Checking whether the required ensemble already exists"
 
@@ -1563,6 +1899,7 @@ run_ensemble_generation() {
     validate_generated_ensemble
 
     log "All required ensemble files are present and readable"
+    cd "$VAR_DIR" || die "cannot return to variational runtime directory: $VAR_DIR"
     return 0
   fi
 
@@ -1576,16 +1913,16 @@ run_ensemble_generation() {
 
   render_ensemble_pert_yaml
 
-  cd "$WORKDIR" || \
-    die "cannot enter ensemble-generation runtime directory: $WORKDIR"
+  cd "$ENS_DIR" || \
+    die "cannot enter ensemble-generation runtime directory: $ENS_DIR"
 
   log "Starting NCAR ensemble perturbation and nonlinear forecasts"
   log "Working directory: $PWD"
   log "Executable: $MPASJEDI_GEN_ENS_EXE"
-  log "Generator YAML: $WORKDIR/gen_ens_pert_B.yaml"
+  log "Generator YAML: $ENS_DIR/gen_ens_pert_B.yaml"
 
-  [ "$PWD" = "$WORKDIR" ] || \
-    die "generator must run from $WORKDIR; current directory is $PWD"
+  [ "$PWD" = "$ENS_DIR" ] || \
+    die "generator must run from $ENS_DIR; current directory is $PWD"
 
   set +e
 
@@ -1595,11 +1932,11 @@ run_ensemble_generation() {
     -n "$SLURM_NTASKS" \
     --cpus-per-task="$SLURM_CPUS_PER_TASK" \
     "$MPASJEDI_GEN_ENS_EXE" \
-    "$WORKDIR/gen_ens_pert_B.yaml"
+    "$ENS_DIR/gen_ens_pert_B.yaml"
 
   local rc=$?
 
-  set -e
+  set +e
 
   [ "$rc" -eq 0 ] || \
     die "mpasjedi_gen_ens_pert_B.x failed with rc=$rc"
@@ -1610,7 +1947,8 @@ run_ensemble_generation() {
   validate_generated_ensemble
 
   log "All required ensemble files are present and readable"
-  log "Preserving ensemble-generation runtime files in $WORKDIR"
+  log "Preserving ensemble-generation runtime files in $ENS_DIR"
+  cd "$VAR_DIR" || die "cannot return to variational runtime directory: $VAR_DIR"
 }
 
 link_4densvar_background_states() {
@@ -1619,7 +1957,7 @@ link_4densvar_background_states() {
   local b0 b1 b2
   b0="$BG_FILE"
   b1="$AN_GUESS_FILE"
-  b2="$ASSIM_ROOT/restart.${WIN_END_DATE:0:4}-${WIN_END_DATE:4:2}-${WIN_END_DATE:6:2}_${WIN_END_DATE:8:2}:00:00.nc"
+  b2="$WIN_END_FILE"
 
   require_file "$b0"
   require_file "$b1"
@@ -1635,6 +1973,26 @@ link_4densvar_background_states() {
 #-------------------------------------------------------------------------------
 
 validate_obs_template_markers "$TEMPLATE_YAML"
+
+analysis_variables_yaml() {
+  # Cloudy CRTM TL/AD requires hydrometeor increments. Keep the known-working
+  # 10-variable space for every mode that may assimilate the operational radiances.
+  cat <<'EOF'
+  - temperature
+  - spechum
+  - uReconstructZonal
+  - uReconstructMeridional
+  - surface_pressure
+  - qc
+  - qi
+  - qg
+  - qr
+  - qs
+EOF
+}
+
+ANALYSIS_VARIABLES="$(analysis_variables_yaml)"
+export ANALYSIS_VARIABLES
 
 make_variational_iterations() {
   local i
@@ -1664,6 +2022,12 @@ EOF
 run_ensemble_generation
 link_4densvar_background_states
 
+# No explicit background-trajectory output is required.  For every low-resolution
+# mode the native analysis-time background is remapped before JEDI starts, and the
+# JEDI middle-window analysis fields are remapped directly back to native 12 km.
+BACKGROUND_TRAJECTORY_OUTPUT_BLOCK=""
+export BACKGROUND_TRAJECTORY_OUTPUT_BLOCK
+
 VARIATIONAL_ITERATIONS="$(cat <<EOF
   minimizer:
     algorithm: DRPCG
@@ -1675,7 +2039,7 @@ export VARIATIONAL_ITERATIONS
 
 if [ "$USE_4D_ENSEMBLE_TRAJECTORIES" = "1" ]; then
   BACKGROUND_BLOCK="$(make_4densvar_background_block)"
-  BACKGROUND_ERROR_BLOCK="$(make_hybrid_background_error_block "$ANL_ISO")"
+  BACKGROUND_ERROR_BLOCK="$(make_hybrid_background_error_block "$STDDEV_ISO")"
 elif [ "$USE_FGAT_ENSEMBLE_B" = "1" ]; then
   BACKGROUND_BLOCK="$(make_static_background_block)"
   BACKGROUND_ERROR_BLOCK="$(make_hybrid_background_error_block "$STDDEV_ISO")"
@@ -1733,7 +2097,9 @@ import re
 p = Path("jedi.yaml")
 s = p.read_text()
 
+s = s.replace("__BACKGROUND_TRAJECTORY_OUTPUT_BLOCK__", os.environ.get("BACKGROUND_TRAJECTORY_OUTPUT_BLOCK", ""))
 s = s.replace("__VARIATIONAL_ITERATIONS__", os.environ["VARIATIONAL_ITERATIONS"])
+s = s.replace("__ANALYSIS_VARIABLES__", os.environ["ANALYSIS_VARIABLES"])
 
 for key in ("AMSUA_METOP_B", "AMSUA_METOP_C", "MHS_METOP_B", "MHS_METOP_C", "IASI_METOP_B"):
     s = s.replace(f"__{key}_BIAS_INPUT_BLOCK__", os.environ.get(f"{key}_BIAS_INPUT_BLOCK", ""))
@@ -1759,12 +2125,65 @@ else:
 p.write_text(s)
 PY
 
+# 4D-Ens-Var requires the subwindow length.
+if [ "$MODE_FAMILY" = "4D-ENS-VAR" ]; then
+    sed -i \
+    "/^[[:space:]]*cost type:[[:space:]]*4D-Ens-Var[[:space:]]*$/a\\  subwindow: PT3H\\
+  parallel subwindows: false" \
+    jedi.yaml
+fi
+
 if [ "$USE_MODEL_BLOCK" = "0" ]; then
   remove_yaml_block MODEL_BLOCK jedi.yaml
   log "$JEDI_VAR_MODE: removed model block"
 else
   sed -i '/#<MODEL_BLOCK>/d; /#<\/MODEL_BLOCK>/d' jedi.yaml
   log "$JEDI_VAR_MODE: keeping model block"
+fi
+
+# Pure 4D-Ens-Var has a multi-state background with YAML anchors.  Validate it
+# immediately after rendering so a malformed anchor/list can never reach the
+# expensive 768-rank variational launch.
+if [ "$USE_4D_ENSEMBLE_TRAJECTORIES" = "1" ]; then
+  set +e
+  python3 - "$ENSEMBLE_MEMBERS" "$WIN_BEG_ISO" "$ANL_ISO" "$WIN_END_ISO" <<'PY4DENSVARYAML'
+from pathlib import Path
+import sys
+import yaml
+
+expected_members = int(sys.argv[1])
+expected_dates = list(sys.argv[2:5])
+
+with Path("jedi.yaml").open(encoding="utf-8") as stream:
+    cfg = yaml.safe_load(stream)
+
+cost = cfg["cost function"]
+assert cost["cost type"] == "4D-Ens-Var", cost.get("cost type")
+
+background = cost["background"]
+states = background.get("states", [])
+assert len(states) == 3, f"4D-Ens-Var background has {len(states)} states, expected 3"
+assert [s.get("date") for s in states] == expected_dates
+for i, state in enumerate(states, start=1):
+    variables = state.get("state variables")
+    assert isinstance(variables, list) and variables, f"background state {i} has no state variables"
+
+be = cost["background error"]
+assert be.get("covariance model") == "hybrid"
+components = be.get("components", [])
+assert len(components) == 2
+ensemble = components[1]["covariance"]
+assert ensemble.get("covariance model") == "ensemble"
+members = ensemble.get("members", [])
+assert len(members) == expected_members,     f"ensemble covariance has {len(members)} members, expected {expected_members}"
+
+print("PASS: rendered 4D-Ens-Var YAML parses correctly")
+print("PASS: deterministic background has 3 states at T-3h/T/T+3h")
+print(f"PASS: ensemble covariance contains {expected_members} members")
+PY4DENSVARYAML
+  yaml_rc=$?
+  set +e
+  [ "$yaml_rc" -eq 0 ] || die "rendered 4D-Ens-Var YAML validation failed; MPI launch suppressed"
 fi
 
 #-------------------------------------------------------------------------------
@@ -1959,6 +2378,71 @@ PYHYBRIDVALIDATE
 fi
 
 #-------------------------------------------------------------------------------
+# 13b. Mode-isolation contract. Abort before MPI if any mode inherited settings
+#      belonging to another DA architecture.
+#-------------------------------------------------------------------------------
+
+log "MODE CONTRACT: family=$MODE_FAMILY cost=$COST_TYPE target=${JEDI_VAR_RESOLUTION}km init_convert=$JEDI_INIT_CONVERT_ENABLE model=$USE_MODEL_BLOCK linear=$USE_LINEAR_MODEL hybrid=$USE_FGAT_ENSEMBLE_B ens4d=$USE_4D_ENSEMBLE_TRAJECTORIES"
+log "MODE CONTRACT: geometry=${MPAS_RESOLUTION}km nCells=$NUM B=$STATIC_BUMPCOV_DATA_DIR STDDEV=$STATIC_STDDEV_FILE"
+
+[ "$MPAS_RESOLUTION" = "$JEDI_VAR_RESOLUTION" ] || \
+  die "$MODE_FAMILY geometry mismatch: MPAS_RESOLUTION=$MPAS_RESOLUTION target=$JEDI_VAR_RESOLUTION"
+[ "$STATIC_BUMPCOV_DATA_DIR" = "$TARGET_B_ROOT/NICAS/merge" ] || \
+  die "$MODE_FAMILY NICAS path does not match selected ${JEDI_VAR_RESOLUTION}km B matrix"
+[ "$STATIC_VBAL_DATA_DIR" = "$TARGET_B_ROOT/VBAL" ] || \
+  die "$MODE_FAMILY VBAL path does not match selected ${JEDI_VAR_RESOLUTION}km B matrix"
+if [ "$JEDI_VAR_RESOLUTION" != "$SOURCE_MPAS_RESOLUTION" ]; then
+  [ "$JEDI_INIT_CONVERT_ENABLE" = "1" ] || die "$MODE_FAMILY at ${JEDI_VAR_RESOLUTION}km must build target INIT from native background"
+  [ "$BG_FILE" = "$TARGET_BG_FILE" ] || die "$MODE_FAMILY is not using target-resolution background"
+else
+  [ "$JEDI_INIT_CONVERT_ENABLE" = "0" ] || die "$MODE_FAMILY native-resolution run should not run direct-remap conversion"
+fi
+
+# Cloudy radiance safety: the generated increment space must include all five hydrometeors.
+python3 - <<'PYMODECHECK'
+import yaml
+with open('jedi.yaml') as f:
+    y=yaml.safe_load(f)
+inc=y['cost function']['analysis variables']
+required={'qc','qi','qg','qr','qs'}
+missing=required-set(inc)
+if missing:
+    raise SystemExit('ERROR: analysis variables missing cloudy-CRTM hydrometeors: '+','.join(sorted(missing)))
+print('PASS: mode isolation and 10-variable cloudy-CRTM increment contract')
+PYMODECHECK
+
+python3 - <<'PYBCHECK'
+import yaml
+with open('jedi.yaml') as f:
+    y = yaml.safe_load(f)
+
+be = y['cost function']['background error']
+if be.get('covariance model') == 'SABER':
+    saber = be['saber central block']
+elif be.get('covariance model') == 'hybrid':
+    saber = be['components'][0]['covariance']['saber central block']
+else:
+    raise SystemExit('ERROR: unsupported background-error layout for B-variable audit')
+
+active = set(saber.get('active variables', []))
+required = {'stream_function','velocity_potential','temperature','spechum','surface_pressure',
+            'qc','qi','qr','qs','qg'}
+missing = required - active
+if missing:
+    raise SystemExit('ERROR: SABER/NICAS active variables missing trained B fields: ' +
+                     ','.join(sorted(missing)))
+
+grids = saber.get('read', {}).get('grids', [])
+gridvars = set()
+for grid in grids:
+    gridvars.update(grid.get('model', {}).get('variables', []))
+missing3d = {'stream_function','velocity_potential','temperature','spechum','qc','qi','qr','qs','qg'} - gridvars
+if missing3d:
+    raise SystemExit('ERROR: NICAS 3-D grid list missing trained fields: ' + ','.join(sorted(missing3d)))
+print('PASS: SABER/NICAS active-variable contract includes trained hydrometeors')
+PYBCHECK
+
+#-------------------------------------------------------------------------------
 # 14. Run MPAS-JEDI variational assimilation.
 #-------------------------------------------------------------------------------
 
@@ -1980,7 +2464,7 @@ srun --label --cpu-bind=cores \
   --cpus-per-task="$SLURM_CPUS_PER_TASK" \
   "$MPASJEDI_EXE" jedi.yaml
 rc=$?
-set -e
+set +e
 
 log "mpasjedi_variational.x rc=$rc"
 
@@ -2011,68 +2495,126 @@ OBS_MHS_METOP_C|mhs_metop-c|$MHS_METOP_C_BIAS_OUT|$MHS_METOP_C_COV_OUT|$MHS_METO
 OBS_IASI_METOP_B|iasi_metop-b|$IASI_METOP_B_BIAS_OUT|$IASI_METOP_B_COV_OUT|$IASI_METOP_B_BIAS_STORE|$IASI_METOP_B_COV_STORE
 EOF
 
-  # The variational run writes diagnostic analysis files throughout the window.
-  # Merge only the analyzed fields from the middle-window diagnostic into a
-  # complete copy of the native middle-window restart.
-  require_file "$AN_GUESS_FILE"
+  # Build the final native 12-km forecast analysis.
+  #
+  # Native-resolution DA: merge analyzed fields directly into the native
+  # analysis-time restart (the long-established operational path).
+  #
+  # 24/30-km DA: reconstruct a complete analyzed state on the DA mesh, remap it
+  # directly back to the native 12-km mesh, and copy only the analyzed variables
+  # into the original native 12-km analysis-time restart.
+
   require_file "$JEDI_MID_ANALYSIS_FILE"
-  [ -s "$AN_GUESS_FILE" ] || die "middle-window guess is empty: $AN_GUESS_FILE"
   [ -s "$JEDI_MID_ANALYSIS_FILE" ] || die "middle-window JEDI analysis is empty: $JEDI_MID_ANALYSIS_FILE"
+  require_file "$SOURCE_AN_GUESS_FILE"
 
-  if [ ! -d "$DCP_TMP_DIR" ]; then
-    mkdir -p "$DCP_TMP_DIR"
-    if command -v lfs >/dev/null 2>&1; then
-      # New files created here inherit the tested 8-OST / 4-MiB layout.
-      lfs setstripe -c 8 -S 4M "$DCP_TMP_DIR" || \
-        log "WARNING: could not set Lustre striping on $DCP_TMP_DIR"
+  if [ "$JEDI_INIT_CONVERT_ENABLE" != "1" ]; then
+    if [ ! -d "$DCP_TMP_DIR" ]; then
+      mkdir -p "$DCP_TMP_DIR"
+      if command -v lfs >/dev/null 2>&1; then
+        lfs setstripe -c 8 -S 4M "$DCP_TMP_DIR" || \
+          log "WARNING: could not set Lustre striping on $DCP_TMP_DIR"
+      fi
     fi
+
+    AN_ANALYSIS_TMP="$DCP_TMP_DIR/$(basename "$AN_ANALYSIS_FILE").tmp.${SLURM_JOB_ID:-$$}"
+    rm -f "$AN_ANALYSIS_TMP"
+
+    log "Parallel-copying native analysis-time guess with dcp"
+    set +e
+    srun -N "$DCP_NODES" -n "$DCP_NTASKS" \
+      --ntasks-per-node="$DCP_TASKS_PER_NODE" \
+      --cpus-per-task=1 --cpu-bind=cores \
+      dcp --bufsize "$DCP_BUFSIZE" --chunksize "$DCP_CHUNKSIZE" \
+          --progress "$DCP_PROGRESS" \
+          "$SOURCE_AN_GUESS_FILE" "$AN_ANALYSIS_TMP"
+    dcp_rc=$?
+    set +e
+    [ "$dcp_rc" -eq 0 ] || die "dcp failed with rc=$dcp_rc"
+
+    log "Overwriting native analyzed fields from $JEDI_MID_ANALYSIS_FILE"
+    set +e
+    ncks -A -v "$JEDI_ANALYSIS_VARS" "$JEDI_MID_ANALYSIS_FILE" "$AN_ANALYSIS_TMP"
+    ncks_rc=$?
+    set +e
+    [ "$ncks_rc" -eq 0 ] || die "native ncks field merge failed with rc=$ncks_rc"
+
+    rm -f "$AN_ANALYSIS_FILE"
+    mv -f "$AN_ANALYSIS_TMP" "$AN_ANALYSIS_FILE"
+    require_file "$AN_ANALYSIS_FILE"
+    log "Final native 12-km analysis created: $AN_ANALYSIS_FILE"
+  else
+    command -v ncks >/dev/null 2>&1 || die "ncks is required for low-resolution analysis reconstruction"
+
+    safe_clean_workdir "$ANALYSIS_TO_NATIVE_DIR"
+    mkdir -p "$ANALYSIS_TO_NATIVE_DIR/build_lowres_analysis" \
+             "$ANALYSIS_TO_NATIVE_DIR/to_native12"
+
+    # JEDI writes only analyzed fields.  First overlay those fields on the
+    # complete target-resolution restart at analysis time.  This complete state
+    # is the source carrier for the direct target->native remap.
+    LOWRES_COMPLETE_ANALYSIS="$ANALYSIS_TO_NATIVE_DIR/build_lowres_analysis/analysis.complete.${JEDI_VAR_RESOLUTION}km.${ANALYSIS_DATE}.nc"
+    rm -f "$LOWRES_COMPLETE_ANALYSIS"
+    cp -p "$TARGET_AN_GUESS_FILE" "$LOWRES_COMPLETE_ANALYSIS"
+    require_file "$LOWRES_COMPLETE_ANALYSIS"
+
+    log "Overlaying JEDI analysis fields on complete ${JEDI_VAR_RESOLUTION}-km analysis-time INIT"
+    set +e
+    ncks -A -v "$JEDI_ANALYSIS_VARS" \
+      "$JEDI_MID_ANALYSIS_FILE" "$LOWRES_COMPLETE_ANALYSIS"
+    ncks_rc=$?
+    set +e
+    [ "$ncks_rc" -eq 0 ] || die "failed to construct complete low-resolution analysis with rc=$ncks_rc"
+
+    state_is_usable "$LOWRES_COMPLETE_ANALYSIS" "$TARGET_NUM" || \
+      die "complete low-resolution analysis is structurally invalid"
+
+    # Directly remap the complete low-resolution analyzed state back to the
+    # native 12-km mesh.  The native analysis-time restart is the target template,
+    # preserving native geometry and a valid native restart structure.
+    # Only analyzed variables from this carrier are then overlaid on the untouched
+    # native analysis-time restart, so native non-DA fields remain authoritative.
+    NATIVE_ANALYSIS_FIELDS_CARRIER="$ANALYSIS_TO_NATIVE_DIR/to_native12/restart.analysis.12km.${ANALYSIS_DATE}.nc"
+
+    build_state_via_remap \
+      "$LOWRES_COMPLETE_ANALYSIS" "$ANALYSIS_DATE" \
+      "$TARGET_NUM" "$SOURCE_NUM" \
+      "$SOURCE_AN_GUESS_FILE" \
+      "$NATIVE_ANALYSIS_FIELDS_CARRIER" \
+      "$ANALYSIS_TO_NATIVE_DIR/to_native12"
+
+    state_is_usable "$NATIVE_ANALYSIS_FIELDS_CARRIER" "$SOURCE_NUM" || \
+      die "12-km reconstructed analysis carrier failed validation"
+
+    NATIVE_ANALYSIS_TMP="$ANALYSIS_TO_NATIVE_DIR/jedi_analysis.12km.${ANALYSIS_DATE}.tmp.nc"
+    rm -f "$NATIVE_ANALYSIS_TMP"
+    cp -p "$SOURCE_AN_GUESS_FILE" "$NATIVE_ANALYSIS_TMP"
+    require_file "$NATIVE_ANALYSIS_TMP"
+
+    log "Overwriting native 12-km analyzed fields from direct-remapped analysis carrier"
+    set +e
+    ncks -A -v "$JEDI_ANALYSIS_VARS" \
+      "$NATIVE_ANALYSIS_FIELDS_CARRIER" "$NATIVE_ANALYSIS_TMP"
+    ncks_rc=$?
+    set +e
+    [ "$ncks_rc" -eq 0 ] || die "failed to overlay native analyzed fields with rc=$ncks_rc"
+
+    state_is_usable "$NATIVE_ANALYSIS_TMP" "$SOURCE_NUM" || \
+      die "reconstructed native analysis has wrong structure"
+
+    rm -f "$AN_ANALYSIS_FILE"
+    mv -f "$NATIVE_ANALYSIS_TMP" "$AN_ANALYSIS_FILE"
+    require_file "$AN_ANALYSIS_FILE"
+
+    ln -sfn "$JEDI_MID_ANALYSIS_FILE" "$ANALYSIS_TO_NATIVE_DIR/jedi_analysis_lowres.nc"
+    ln -sfn "$LOWRES_COMPLETE_ANALYSIS" "$ANALYSIS_TO_NATIVE_DIR/jedi_analysis_complete_lowres.nc"
+    ln -sfn "$NATIVE_ANALYSIS_FIELDS_CARRIER" "$ANALYSIS_TO_NATIVE_DIR/jedi_analysis_fields_12km_carrier.nc"
+    ln -sfn "$AN_ANALYSIS_FILE" "$ANALYSIS_TO_NATIVE_DIR/jedi_analysis_native12km.nc"
+
+    log "Final native 12-km analysis created through direct MPAS return remap"
+    log "Non-DA fields preserved from native analysis-time background: $SOURCE_AN_GUESS_FILE"
+    log "Native analysis: $AN_ANALYSIS_FILE"
   fi
-
-  AN_ANALYSIS_TMP="$DCP_TMP_DIR/$(basename "$AN_ANALYSIS_FILE").tmp.${SLURM_JOB_ID:-$$}"
-  rm -f "$AN_ANALYSIS_TMP"
-
-  log "Parallel-copying middle-window guess with dcp"
-  log "dcp source=$AN_GUESS_FILE"
-  log "dcp target=$AN_ANALYSIS_TMP"
-  log "dcp layout: nodes=$DCP_NODES ranks=$DCP_NTASKS tasks/node=$DCP_TASKS_PER_NODE"
-
-  set +e
-  srun -N "$DCP_NODES" -n "$DCP_NTASKS" \
-    --ntasks-per-node="$DCP_TASKS_PER_NODE" \
-    --cpus-per-task=1 \
-    --cpu-bind=cores \
-    dcp \
-      --bufsize "$DCP_BUFSIZE" \
-      --chunksize "$DCP_CHUNKSIZE" \
-      --progress "$DCP_PROGRESS" \
-      "$AN_GUESS_FILE" \
-      "$AN_ANALYSIS_TMP"
-  dcp_rc=$?
-  set -e
-
-  [ "$dcp_rc" -eq 0 ] || die "dcp failed with rc=$dcp_rc"
-  [ -s "$AN_ANALYSIS_TMP" ] || die "dcp did not create a nonempty file: $AN_ANALYSIS_TMP"
-
-  src_size="$(stat -c %s "$AN_GUESS_FILE")"
-  dst_size="$(stat -c %s "$AN_ANALYSIS_TMP")"
-  [ "$src_size" -eq "$dst_size" ] || \
-    die "dcp size mismatch: source=$src_size destination=$dst_size"
-
-  log "Overwriting analyzed fields from $JEDI_MID_ANALYSIS_FILE"
-  set +e
-  ncks -A -v "$JEDI_ANALYSIS_VARS" \
-    "$JEDI_MID_ANALYSIS_FILE" \
-    "$AN_ANALYSIS_TMP"
-  ncks_rc=$?
-  set -e
-
-  [ "$ncks_rc" -eq 0 ] || die "ncks field merge failed with rc=$ncks_rc"
-  [ -s "$AN_ANALYSIS_TMP" ] || die "merged analysis is empty: $AN_ANALYSIS_TMP"
-
-  rm -f "$AN_ANALYSIS_FILE"
-  mv -f "$AN_ANALYSIS_TMP" "$AN_ANALYSIS_FILE"
-  require_file "$AN_ANALYSIS_FILE"
-  log "Final forecast analysis created: $AN_ANALYSIS_FILE"
 fi
 
 exit "$rc"

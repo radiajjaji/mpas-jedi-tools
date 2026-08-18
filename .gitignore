@@ -46,3 +46,18 @@ bg.*.nc
 tmp/
 temp/
 scratch/
+
+# MPAS direct-remapping static/generated NetCDF data
+*.smooth.nc
+*.conserve.nc
+*.scrip.nc
+restart.*.template.nc
+restart.*.nc
+INIT.*.nc
+
+# MPAS runtime output
+remap.log
+remap.*.log
+log.atmosphere.*
+log.init_atmosphere.*
+restart_timestamp

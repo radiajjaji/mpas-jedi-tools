@@ -38,16 +38,7 @@ cost function:
 
 
   analysis variables: &incvars
-  - temperature
-  - spechum
-  - uReconstructZonal
-  - uReconstructMeridional
-  - surface_pressure
-  - qc
-  - qi
-  - qg
-  - qr
-  - qs
+__ANALYSIS_VARIABLES__
 
 #<MODEL_BLOCK>
   # Deterministic nonlinear trajectory used by 3D-FGAT and 4D-Var/4D-FGAT.
